@@ -1,0 +1,14 @@
+name: pdf_qna_rag
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy=1.24
+  - pandas
+  - matplotlib
+  - jupyter
+  - pip
+  - pip:
+    - llama-index
+    - llama-index-llms-google
