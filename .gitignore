@@ -39,6 +39,7 @@ Data_archive/*
 
 # Ignore generated data
 data/*
+pdf/*
 
 # Keep folder structure
 !data/**/.gitkeep
