@@ -1,41 +1,63 @@
+import asyncio
 import os
+import uuid
 import tempfile
 import shutil
-from typing import List, Optional
-from pathlib import Path
+import time
+from typing import List, Optional, Dict, Any
 from settings import settings
-from dotenv import load_dotenv
-
-
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic_settings import BaseSettings
 import json
-import uuid
-import asyncio
-import time
-import fitz
 
 # LlamaIndex Imports
-from llama_index.core import StorageContext, VectorStoreIndex, SimpleDirectoryReader
-from llama_index.vector_stores.chroma import ChromaVectorStore
+from llama_index.core import (
+    Settings as LlamaSettings,
+    VectorStoreIndex,
+    SimpleDirectoryReader,
+    StorageContext
+)
+from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
-from llama_index.core.memory import ChatMemoryBuffer
-from llama_index.core import Settings as LlamaSettings
-import chromadb
+from llama_index.vector_stores.pinecone import PineconeVectorStore
 
+# Pinecone Imports
+from pinecone import Pinecone, ServerlessSpec
 
+# PDF Processing
+import fitz  # PyMuPDF
+
+# Load Env Variables
+from dotenv import load_dotenv
 load_dotenv()
 
-# Load API Key from Environment Variable (Set this in Render later)
-GEMINI_API_KEY = os.getenv("API_KEY")
-print("this is GEMINI_API_KEY : ", GEMINI_API_KEY)
+# --- Configuration ---
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT", "us-east-1")
+INDEX_NAME = "pdf-rag"
 
-if not GEMINI_API_KEY:
-    raise ValueError("Missing GOOGLE_API_KEY in environment variables!")
+if not GEMINI_API_KEY or not PINECONE_API_KEY:
+    raise ValueError("Missing API Keys in .env file!")
 
+# Initialize Pinecone Client (Global)
+pc = Pinecone(api_key=PINECONE_API_KEY)
+# Step 1 — delete old index
+pc.delete_index(INDEX_NAME)
+
+# Step 2 — recreate with correct dimension
+pc.create_index(
+    name=INDEX_NAME,
+    dimension=3072,  # ← matches gemini-embedding-001
+    metric="cosine",
+    spec=ServerlessSpec(cloud="aws", region=PINECONE_ENVIRONMENT)
+)
+
+# Global Dictionary to store active sessions (Engine + Metadata)
+# Structure: { "session_id": { "chat_engine": obj, "filename": str } }
+active_sessions: Dict[str, Dict[str, Any]] = {}
 
 # Initialize FastAPI
 app = FastAPI(title=settings.app_config.app_name)
@@ -51,61 +73,58 @@ app.add_middleware(
 
 
 
-# Step 2: Initialize the Session Store
-# In-memory store for active user sessions
-# Structure: { "session_id": { "chat_engine": engine_object, "filename": "doc.pdf" } }
-active_sessions = {}
-
-
-
-
-
 
 # def initialize_engine(api_key: str, pdf_path: str):
-def initialize_engine(pdf_path: str):
+def initialize_engine(pdf_path: str, session_id: str):
     """
-    Creates a NEW chat engine for a specific user.
-    Returns the engine object so we can store it in the session dictionary.
+    Creates a NEW chat engine for a specific user session.
+    Uses Pinecone with 'namespace' to isolate data per session.
+    Includes Chat Memory for conversation history.
     """
-    # 1. Setup Models (Specific to this request)
-    # We use the settings you imported earlier
+    # 1. Setup Models (Gemini)
     llm = GoogleGenAI(model="models/gemini-2.5-flash", api_key=GEMINI_API_KEY)
-    embed_model = GoogleGenAIEmbedding(model="models/gemini-embedding-001", api_key=GEMINI_API_KEY)
+    embed_model = GoogleGenAIEmbedding(
+        model_name="models/gemini-embedding-001", 
+        api_key=GEMINI_API_KEY,
+        output_dimensionality=768
+        )
     
     # Apply settings locally for this index creation
 
     LlamaSettings.llm = llm
     LlamaSettings.embed_model = embed_model
 
-    # 2. Setup Persistent ChromaDB
-    # We use the path from your settings.py
-    persistent_client = chromadb.PersistentClient(path=settings.app_config.db_path)
+    # 2. Ensure Pinecone Index Exists
+    if INDEX_NAME not in pc.list_indexes().names():
+        pc.create_index(
+            name=INDEX_NAME,
+            dimension=768,
+            metric="cosine",
+            spec=ServerlessSpec(cloud="aws", region=PINECONE_ENVIRONMENT)
+        )
     
-    # CRITICAL CHANGE: Create a unique collection name per session? 
-    # For now, we will use one shared collection but isolate via logic, 
-    # OR better: Use a unique collection name per session to prevent data mixing.
-    # Let's generate a unique collection name based on a timestamp or random ID to be safe.
+    pinecone_index = pc.Index(INDEX_NAME)
 
-    unique_collection_name = f"collection_{int(time.time())}" 
-    
-    chroma_collection = persistent_client.get_or_create_collection(unique_collection_name)
-    vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+    # 3. Create Vector Store with NAMESPACE = session_id
+    # This ensures data for User A never mixes with User B
+    vector_store = PineconeVectorStore(pinecone_index=pinecone_index, namespace=session_id)
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    # 3. Load Documents
+    # 4. Load Documents
     documents = SimpleDirectoryReader(input_files=[pdf_path]).load_data()
     
     if not documents:
         raise ValueError("No text could be extracted from the PDF.")
 
-    # 4. Create Index
+    # 5. Create Index from Documents
+    # We create a temporary index object just to build the engine
     index = VectorStoreIndex.from_documents(
         documents, 
         storage_context=storage_context,
         show_progress=True
     )
 
-    # 5. Create Chat Engine with Memory
+    # 6. Create Chat Engine WITH MEMORY
     memory = ChatMemoryBuffer.from_defaults(token_limit=3900)
     
     chat_engine = index.as_chat_engine(
@@ -119,7 +138,7 @@ def initialize_engine(pdf_path: str):
     )
     
     # RETURN the engine instead of saving to a global variable
-    return chat_engine, unique_collection_name
+    return chat_engine
 
 
 @app.post("/upload")
@@ -128,7 +147,7 @@ async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
-    # 1. Generate a Unique Session ID for this user
+    # 1. Generate a Unique Session ID for this user (Once)
     session_id = str(uuid.uuid4())
     
     # 2. Save uploaded file temporarily
@@ -157,14 +176,14 @@ async def upload_pdf(file: UploadFile = File(...)):
         # -----------------------------------
         
         # 3. Initialize the engine (Get engine + collection name)
+        # 3. Initialize Engine (Passing the SAME session_id)
         # chat_engine, collection_name = initialize_engine(api_key, temp_file_path)
         # Call without API key
-        chat_engine, collection_name = initialize_engine(temp_file_path)
+        chat_engine = initialize_engine(temp_file_path, session_id)
         
-        # 4. STORE in our dictionary
+        # 4. STORE in global dictionary
         active_sessions[session_id] = {
             "chat_engine": chat_engine,
-            "collection_name": collection_name,
             "filename": file.filename
         }
         
@@ -173,9 +192,12 @@ async def upload_pdf(file: UploadFile = File(...)):
         return {
             "message": "PDF processed successfully!", 
             "session_id": session_id,
-            "filename": file.filename
+            "filename": file.filename,
+            "pages": page_count
         }
     
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
     
@@ -274,8 +296,8 @@ async def chat_stream(session_id: str = Form(...), query: str = Form(...)):
     if session_id not in active_sessions:
         raise HTTPException(status_code=404, detail="Session not found.")
     
-    # 2. RETRIEVAL
-    engine = active_sessions[session_id]["chat_engine"]
+    session_data = active_sessions[session_id]
+    chat_engine = session_data["chat_engine"]
 
     # 3. GENERATOR FUNCTION: This runs asynchronously
     async def event_generator():
@@ -285,7 +307,7 @@ async def chat_stream(session_id: str = Form(...), query: str = Form(...)):
             
             # WRAP THE SYNC CALL IN run_in_executor
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, lambda: engine.stream_chat(query))
+            response = await loop.run_in_executor(None, lambda: chat_engine.stream_chat(query))
             
             # Iterate over tokens as they are generated
             for token in response.response_gen:
@@ -315,6 +337,9 @@ async def chat_stream(session_id: str = Form(...), query: str = Form(...)):
     # media_type='text/event-stream' tells the browser "This is a live stream"
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+@app.get("/sessions")
+async def list_sessions():
+    return {"active_sessions": list(active_sessions.keys())}
 
 @app.post("/clear")
 async def clear_session(session_id: str = Form(...)):
@@ -329,12 +354,9 @@ async def clear_session(session_id: str = Form(...)):
         # 2. RETRIEVAL: Get the collection name before we delete the session info
         collection_name = active_sessions[session_id]["collection_name"]
         
-        # 3. CLEANUP CHROMADB (Disk)
-        # We need a client to access the database and delete the specific collection
-        persistent_client = chromadb.PersistentClient(path=settings.app_config.db_path)
-        
-        # This permanently deletes the vector data for this PDF from the disk
-        persistent_client.delete_collection(name=collection_name)
+        # Optional: Delete data from Pinecone namespace here if you want permanent cleanup
+        index = pc.Index(INDEX_NAME)
+        index.delete(delete_all=True, namespace=session_id)
         
         # 4. CLEANUP MEMORY (RAM)
         # Remove the engine and data from our dictionary
