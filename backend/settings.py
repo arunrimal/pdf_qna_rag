@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         # Point to your JSON file. 
         # Using __file__ ensures it looks relative to this python file.
         # env_file=Path(__file__).parent / "config.json", 
-        env_file="../.env", 
+        env_file=".env", 
         env_file_encoding='utf-8',
         case_sensitive=True,  # Important: Your JSON keys are uppercase/mixed
         extra='ignore'        # Ignore extra fields in JSON not defined here
