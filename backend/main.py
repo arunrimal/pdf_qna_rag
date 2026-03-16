@@ -4,6 +4,7 @@ import shutil
 from typing import List, Optional
 from pathlib import Path
 from settings import settings
+from dotenv import load_dotenv
 
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
@@ -13,15 +14,27 @@ from pydantic_settings import BaseSettings
 import json
 import uuid
 import asyncio
+import time
+import fitz
 
 # LlamaIndex Imports
-from llama_index.core import Settings, StorageContext, VectorStoreIndex, SimpleDirectoryReader
+from llama_index.core import StorageContext, VectorStoreIndex, SimpleDirectoryReader
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
 from llama_index.core.memory import ChatMemoryBuffer
+from llama_index.core import Settings as LlamaSettings
 import chromadb
 
+
+load_dotenv()
+
+# Load API Key from Environment Variable (Set this in Render later)
+GEMINI_API_KEY = os.getenv("API_KEY")
+print("this is GEMINI_API_KEY : ", GEMINI_API_KEY)
+
+if not GEMINI_API_KEY:
+    raise ValueError("Missing GOOGLE_API_KEY in environment variables!")
 
 
 # Initialize FastAPI
@@ -45,18 +58,22 @@ active_sessions = {}
 
 
 
-def initialize_engine(api_key: str, pdf_path: str):
+
+
+
+# def initialize_engine(api_key: str, pdf_path: str):
+def initialize_engine(pdf_path: str):
     """
     Creates a NEW chat engine for a specific user.
     Returns the engine object so we can store it in the session dictionary.
     """
     # 1. Setup Models (Specific to this request)
     # We use the settings you imported earlier
-    llm = GoogleGenAI(model="models/gemini-2.5-flash", api_key=api_key)
-    embed_model = GoogleGenAIEmbedding(model="models/gemini-embedding-001", api_key=api_key)
+    llm = GoogleGenAI(model="models/gemini-2.5-flash", api_key=GEMINI_API_KEY)
+    embed_model = GoogleGenAIEmbedding(model="models/gemini-embedding-001", api_key=GEMINI_API_KEY)
     
     # Apply settings locally for this index creation
-    from llama_index.core import Settings as LlamaSettings
+
     LlamaSettings.llm = llm
     LlamaSettings.embed_model = embed_model
 
@@ -68,7 +85,7 @@ def initialize_engine(api_key: str, pdf_path: str):
     # For now, we will use one shared collection but isolate via logic, 
     # OR better: Use a unique collection name per session to prevent data mixing.
     # Let's generate a unique collection name based on a timestamp or random ID to be safe.
-    import time
+
     unique_collection_name = f"collection_{int(time.time())}" 
     
     chroma_collection = persistent_client.get_or_create_collection(unique_collection_name)
@@ -106,7 +123,8 @@ def initialize_engine(api_key: str, pdf_path: str):
 
 
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...), api_key: str = Form(...)):
+# async def upload_pdf(file: UploadFile = File(...), api_key: str = Form(...)):
+async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
@@ -120,9 +138,28 @@ async def upload_pdf(file: UploadFile = File(...), api_key: str = Form(...)):
     try:
         with open(temp_file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+
+        # --- NEW: Check Page Count Limit ---
+        MAX_PAGES = 5  # Set your limit here
+        
+        doc = fitz.open(temp_file_path)
+        page_count = len(doc)
+        doc.close()  # Close the file handle immediately
+        
+        if page_count > MAX_PAGES:
+            # Clean up temp file before raising error
+            os.remove(temp_file_path)
+            os.rmdir(temp_dir)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"PDF is too large! Maximum allowed is {MAX_PAGES} pages. Your file has {page_count} pages."
+            )
+        # -----------------------------------
         
         # 3. Initialize the engine (Get engine + collection name)
-        chat_engine, collection_name = initialize_engine(api_key, temp_file_path)
+        # chat_engine, collection_name = initialize_engine(api_key, temp_file_path)
+        # Call without API key
+        chat_engine, collection_name = initialize_engine(temp_file_path)
         
         # 4. STORE in our dictionary
         active_sessions[session_id] = {
