@@ -19,3 +19,6 @@ out/
 *.log
 chroma_db_storage/
 *.pdf
+
+#files
+.json
