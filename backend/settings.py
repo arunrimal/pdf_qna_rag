@@ -12,7 +12,9 @@ class AppConfig(BaseModel):
 
 # 2. Define the Main Settings
 class Settings(BaseSettings):
-    api_key: SecretStr = Field(alias="API_KEY")
+    google_api_key: SecretStr = Field(alias="GOOGLE_API_KEY")
+    pinecone_api_key: SecretStr = Field(alias="PINECONE_API_KEY")
+    pinecone_environment: str = Field(alias="PINECONE_ENVIRONMENT")
     app_config: AppConfig = Field(alias="APP_CONFIG")
 
     # 3. V2 Configuration
