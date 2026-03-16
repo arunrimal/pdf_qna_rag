@@ -139,16 +139,16 @@ export default function Home() {
     setLoading(true); // Show loading state
     const formData = new FormData();
     formData.append("file", file);
-    
-    // We need an API key. For now, let's prompt the user or hardcode it for testing.
-    // Ideally, you'd have a settings modal. Let's prompt for simplicity:
-    const apiKey = prompt("Please enter your Google Gemini API Key:");
-        if (!apiKey) {
-      alert("API Key is required!");
-      setLoading(false);
-      return;
-    }
-    formData.append("api_key", apiKey);
+
+    // // We need an API key. For now, let's prompt the user or hardcode it for testing.
+    // // Ideally, you'd have a settings modal. Let's prompt for simplicity:
+    // const apiKey = prompt("Please enter your Google Gemini API Key:");
+    //     if (!apiKey) {
+    //   alert("API Key is required!");
+    //   setLoading(false);
+    //   return;
+    // }
+    // formData.append("api_key", apiKey);
 
     try {
       console.log("Attempting upload to http://localhost:8000/upload...");
