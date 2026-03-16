@@ -21,4 +21,4 @@ chroma_db_storage/
 *.pdf
 
 #files
-.json
+backend/config.json
