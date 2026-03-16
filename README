@@ -1,0 +1,103 @@
+# 📄 PDF Q&A RAG Application
+
+An intelligent, full-stack **Retrieval-Augmented Generation (RAG)** application that allows users to upload PDF documents and chat with them using AI. Built with **Next.js**, **FastAPI**, **Google Gemini**, and **Pinecone**.
+
+## 🌟 Live Demo
+- **Frontend**: (https://pdf-qna-rag-frontend.vercel.app/)
+- **Backend API**: (https://pdf-qna-rag-backend.onrender.com/docs)
+
+> **Note:** The backend runs on a free tier and may take ~30-50 seconds to "wake up" on the first request after inactivity.
+
+## ✨ Features
+- **🤖 AI-Powered Chat**: Ask questions about your PDF content using Google's **Gemini 1.5 Flash** model.
+- **📄 Smart Document Processing**: Automatically extracts text from PDFs (limited to 5 pages for cost optimization).
+- **🔒 Secure & Private**: 
+  - API keys are stored securely in environment variables (never exposed to the client).
+  - Users do **not** need their own API keys to use the app.
+- **⚡ Real-Time Streaming**: Responses are streamed token-by-token for a smooth, chat-like experience.
+- **💾 Persistent Vector Storage**: Uses **Pinecone** to store embeddings, ensuring data survives server restarts.
+- **👥 Multi-User Isolation**: Each upload session is isolated using unique namespaces, preventing data mixing between users.
+- **📱 Responsive UI**: Clean, modern interface built with Next.js and Tailwind CSS.
+
+## 🛠️ Tech Stack
+
+| Component | Technology |
+| :--- | :--- |
+| **Frontend** | Next.js 14+, React, TypeScript, Tailwind CSS |
+| **Backend** | Python 3.11, FastAPI, Uvicorn |
+| **AI Model** | Google Generative AI (Gemini 1.5 Flash & Embedding-001) |
+| **Vector DB** | Pinecone (Serverless, 768 dimensions) |
+| **Orchestration** | LlamaIndex (v0.10+) |
+| **Deployment** | Frontend on **Vercel**, Backend on **Render** |
+| **Environment** | Anaconda (Local), Docker-compatible (Cloud) |
+
+## 🏗️ Architecture
+
+```mermaid
+graph TD
+    User[User Browser] -->|HTTPS| Vercel[Frontend (Next.js)]
+    Vercel -->|JSON/API| Render[Backend (FastAPI)]
+    Render -->|gRPC/REST| Pinecone[(Pinecone Vector DB)]
+    Render -->|API Call| Google[Google Gemini AI]
+    
+    subgraph "Cloud Infrastructure"
+        Vercel
+        Render
+        Pinecone
+        Google
+    end
+
+🚀 Getting Started (Local Development)
+Prerequisites
+Node.js & npm
+Python 3.11+ (Anaconda recommended)
+Google Cloud API Key (Gemini)
+Pinecone API Key
+
+1. Clone the Repository
+git clone https://github.com/your-username/your-repo-name.git
+cd your-repo-name
+
+2. Backend Setup
+cd backend
+conda create -n rag-env python=3.11
+conda activate rag-env
+pip install -r requirements.txt
+
+# Create .env file
+cp .env.example .env
+# Edit .env and add your GOOGLE_API_KEY and PINECONE_API_KEY
+python main.py
+
+3. Frontend Setup
+Open a new terminal:
+    cd frontend
+    npm install
+    # Create .env.local
+    echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
+    npm run dev
+
+Deployment Guide
+This project uses a split-deployment strategy for scalability and cost-efficiency.
+Backend (Render)
+Push code to GitHub.
+Connect repo to Render as a "Web Service".
+Set Root Directory to backend.
+Set Build Command: pip install -r requirements.txt
+Set Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
+Add Environment Variables: GOOGLE_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT.
+Frontend (Vercel)
+Connect same repo to Vercel.
+Set Root Directory to frontend.
+Add Environment Variable: NEXT_PUBLIC_API_URL (value: your Render URL).
+Deploy.
+⚠️ Limitations & Notes
+Cold Starts: The free tier on Render spins down after 15 minutes of inactivity. The first request may take ~45 seconds to complete.
+Page Limit: Uploads are restricted to 5 pages per PDF to manage token costs and vector limits.
+Session Memory: Chat history is stored in server memory. If the server restarts, conversation history is lost (though the uploaded document data remains safe in Pinecone).
+🔒 Security
+Secrets Management: All sensitive keys are managed via Environment Variables.
+CORS: Configured to allow requests only from trusted origins in production.
+Input Validation: File types and sizes are strictly validated before processing.
+📄 License
+This project is open source and available under the MIT License.
