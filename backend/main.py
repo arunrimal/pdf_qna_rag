@@ -87,7 +87,8 @@ def initialize_engine(pdf_path: str, session_id: str):
     embed_model = GoogleGenAIEmbedding(
         model_name="models/gemini-embedding-001", 
         api_key=GEMINI_API_KEY,
-        output_dimensionality=768
+        # output_dimensionality=768
+        output_dimensionality=3072
         )
     
     # Apply settings locally for this index creation
@@ -364,7 +365,7 @@ async def chat_stream(session_id: str = Form(...), query: str = Form(...)):
                 data = json.dumps({"token": token})
                 yield f"data: {data}\n\n"
             
-            # After the text is done, send the sources as a final event
+            # # After the text is done, send the sources as a final event
             sources = []
             # if response.sources:
             #     for source in response.sources:
@@ -380,6 +381,24 @@ async def chat_stream(session_id: str = Form(...), query: str = Form(...)):
                     "snippet": node.text[:150],
                     "score": round(node_with_score.score, 4) if node_with_score.score else "N/A"
                 })
+            # sources = []
+            # if hasattr(response, 'sources') and response.sources:
+            #     for source in response.sources:
+            #         try:
+            #             if hasattr(source, 'node'):
+            #                 node = source.node
+            #             elif hasattr(source, 'content') and hasattr(source.content, 'node'):
+            #                 node = source.content.node
+            #             else:
+            #                 continue  # Skip unknown ToolOutput shapes
+                        
+            #             sources.append({
+            #                 "page": node.metadata.get("page_label", "N/A"),
+            #                 "snippet": node.text[:150]
+            #             })
+            #         except Exception as src_err:
+            #             print(f"Warning: Could not parse source: {src_err}")
+            #             continue  # Never let source parsing kill the response
 
             
             final_data = json.dumps({"sources": sources, "done": True})
