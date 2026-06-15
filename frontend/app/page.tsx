@@ -1,28 +1,14 @@
-"use client";
+"use client"; // Required for interactivity in Next.js App Router
 
 import { useState, useRef, useEffect } from "react";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-type Source = {
-  page: string;
-  snippet: string;
-  score: number | string;
-};
-
-type Message = {
-  role: string;
-  content: string;
-  sources?: Source[];
-};
-
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
 
+  // Auto-scroll to bottom ref
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -33,19 +19,10 @@ export default function Home() {
     scrollToBottom();
   }, [messages]);
 
-  const toggleSources = (idx: number) => {
-    setExpandedSources((prev) => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
-      return next;
-    });
-  };
-
   return (
     <main className="flex min-h-screen flex-col bg-gray-900 text-white">
-
-      {/* Header */}
+      
+      {/* 1. Header */}
       <header className="p-4 border-b border-gray-700 bg-gray-800 shadow-md sticky top-0 z-10">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
           <h1 className="text-xl font-bold text-blue-400">📄 PDF Q&A RAG</h1>
@@ -57,7 +34,7 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Chat Area */}
+      {/* 2. Chat Area (Constrained Width & Centered) */}
       <div className="flex-1 overflow-y-auto p-4 w-full max-w-4xl mx-auto space-y-6">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500 mt-20 space-y-4">
@@ -68,7 +45,7 @@ export default function Home() {
           messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
                 className={`max-w-[85%] md:max-w-[75%] rounded-2xl p-4 shadow-lg ${
@@ -79,40 +56,10 @@ export default function Home() {
               >
                 <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">{msg.content}</p>
               </div>
-
-              {/* Sources */}
-              {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
-                <div className="max-w-[85%] md:max-w-[75%] mt-2">
-                  <button
-                    onClick={() => toggleSources(idx)}
-                    className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition"
-                  >
-                    <span>{expandedSources.has(idx) ? "▾" : "▸"}</span>
-                    {msg.sources.length} source{msg.sources.length > 1 ? "s" : ""}
-                  </button>
-
-                  {expandedSources.has(idx) && (
-                    <div className="mt-2 space-y-2">
-                      {msg.sources.map((src, sIdx) => (
-                        <div
-                          key={sIdx}
-                          className="bg-gray-700 border border-gray-600 rounded-xl p-3 text-xs text-gray-300"
-                        >
-                          <div className="flex justify-between mb-1">
-                            <span className="text-blue-300 font-medium">Page {src.page}</span>
-                            <span className="text-gray-400">Score: {src.score}</span>
-                          </div>
-                          <p className="leading-relaxed italic">"{src.snippet}"</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           ))
         )}
-
+        
         {loading && (
           <div className="flex justify-start">
             <div className="bg-gray-800 border border-gray-700 rounded-2xl rounded-bl-none p-4 shadow-lg">
@@ -124,13 +71,15 @@ export default function Home() {
             </div>
           </div>
         )}
+        {/* Invisible element to scroll to */}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
+      {/* 3. Input Area (Fixed at bottom, Constrained Width) */}
       <div className="p-4 border-t border-gray-700 bg-gray-800 w-full">
         <div className="max-w-4xl mx-auto">
-
+          
+          {/* File Upload Section */}
           {!sessionId && (
             <div className="flex justify-center py-4">
               <label className="cursor-pointer bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-medium px-6 py-3 rounded-full shadow-lg transition transform hover:scale-105 flex items-center gap-2">
@@ -146,6 +95,7 @@ export default function Home() {
             </div>
           )}
 
+          {/* Chat Input Section */}
           {sessionId && (
             <form onSubmit={handleSendMessage} className="flex gap-3 items-end">
               <input
@@ -167,7 +117,7 @@ export default function Home() {
               </button>
             </form>
           )}
-
+          
           <p className="text-center text-xs text-gray-500 mt-3">
             Powered by FastAPI, LlamaIndex & Gemini
           </p>
@@ -176,20 +126,38 @@ export default function Home() {
     </main>
   );
 
+
+
+  // --- Placeholder Functions (We will implement these next) ---
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setLoading(true);
+    // alert(`Upload triggered for: ${file.name}`);
+    // TODO: Call API to upload
+
+    setLoading(true); // Show loading state
     const formData = new FormData();
     formData.append("file", file);
 
-    try {
-      console.log(`Attempting upload to ${API_BASE_URL}/upload...`);
+    // // We need an API key. For now, let's prompt the user or hardcode it for testing.
+    // // Ideally, you'd have a settings modal. Let's prompt for simplicity:
+    // const apiKey = prompt("Please enter your Google Gemini API Key:");
+    //     if (!apiKey) {
+    //   alert("API Key is required!");
+    //   setLoading(false);
+    //   return;
+    // }
+    // formData.append("api_key", apiKey);
 
-      const response = await fetch(`${API_BASE_URL}/upload`, {
+    try {
+      console.log("Attempting upload to http://localhost:8000/upload...");
+      
+      const response = await fetch("http://localhost:8000/upload", {
         method: "POST",
         body: formData,
+        // Explicitly ensure no extra headers interfere
+        // Fetch automatically sets 'Content-Type': 'multipart/form-data' with boundary
       });
 
       console.log("Response status:", response.status);
@@ -201,36 +169,42 @@ export default function Home() {
 
       const data = await response.json();
       console.log("Upload success:", data);
-
+      
       setSessionId(data.session_id);
-      setMessages([{
-        role: "assistant",
-        content: `Successfully loaded "${data.filename}". Ask me anything!`,
+      setMessages((prev) => [...prev, { 
+        role: "assistant", 
+        content: `Successfully loaded "${data.filename}". Ask me anything!` 
       }]);
 
     } catch (error: any) {
       console.error("Full error object:", error);
       let msg = "Failed to connect to backend.";
+      
       if (error.message.includes("Failed to fetch")) {
-        msg = `Could not connect to ${API_BASE_URL}. Is the server running? Check CORS.`;
+        msg = "Could not connect to http://localhost:8000. Is the server running? Check CORS.";
       } else {
         msg = error.message;
       }
+      
       alert(msg);
     } finally {
       setLoading(false);
     }
+
   }
 
-  async function handleSendMessage(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSendMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!input.trim() || !sessionId) return;
 
     const userMessage = input;
-    setInput("");
+    setInput(""); // Clear input immediately
     setLoading(true);
 
+    // 1. Add User Message to UI
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+
+    // 2. Prepare a placeholder for AI response
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
@@ -238,15 +212,20 @@ export default function Home() {
       formData.append("session_id", sessionId);
       formData.append("query", userMessage);
 
-      const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+      // 3. Call the Streaming Endpoint
+      const response = await fetch("http://localhost:8000/chat/stream", {
         method: "POST",
         body: formData,
       });
 
-      if (!response.ok) throw new Error("Failed to get response");
+      if (!response.ok) {
+        throw new Error("Failed to get response");
+      }
 
+      // 4. Read the Stream (Server-Sent Events)
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
+
       if (!reader) throw new Error("No reader available");
 
       let aiText = "";
@@ -255,42 +234,41 @@ export default function Home() {
       while (!done) {
         const { value, done: streamDone } = await reader.read();
         done = streamDone;
-
+        
         if (value) {
           const chunk = decoder.decode(value);
+          // Split by double newline (SSE format)
           const lines = chunk.split("\n\n");
-
+          
           for (const line of lines) {
             if (line.startsWith("data: ")) {
-              const jsonStr = line.slice(6);
+              const jsonStr = line.slice(6); // Remove "data: "
               try {
                 const data = JSON.parse(jsonStr);
-
+                
+                // Append token if present
                 if (data.token) {
                   aiText += data.token;
+                  // Update the last message (the AI's placeholder)
                   setMessages((prev) => {
                     const newMsgs = [...prev];
                     newMsgs[newMsgs.length - 1] = { role: "assistant", content: aiText };
                     return newMsgs;
                   });
                 }
-
-                if (data.done) {
-                  setMessages((prev) => {
-                    const newMsgs = [...prev];
-                    newMsgs[newMsgs.length - 1] = {
-                      role: "assistant",
-                      content: aiText,
-                      sources: data.sources ?? [],
-                    };
-                    return newMsgs;
-                  });
+                
+                // Handle sources at the end
+                if (data.done && data.sources) {
+                  console.log("Sources received:", data.sources);
+                  // Optional: Append sources to the message or show separately
+                  // For now, we just finish the text
                 }
-
-                if (data.error) throw new Error(data.error);
-
+                
+                if (data.error) {
+                  throw new Error(data.error);
+                }
               } catch (parseErr) {
-                // ignore partial/empty chunks
+                // Ignore empty lines or parsing errors for partial chunks
               }
             }
           }
