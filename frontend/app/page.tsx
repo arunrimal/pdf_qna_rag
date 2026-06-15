@@ -10,11 +10,33 @@ const API_BASE_URL = "http://localhost:8000";
 
 
 
+type Source = {
+  page: string;
+  snippet: string;
+  score: number | string;
+};
+
+type Message = {
+  role: string;
+  content: string;
+  sources?: Source[];
+};
+
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
+
+  const toggleSources = (idx: number) => {
+    setExpandedSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
 
   // Auto-scroll to bottom ref
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -53,7 +75,7 @@ export default function Home() {
           messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
             >
               <div
                 className={`max-w-[85%] md:max-w-[75%] rounded-2xl p-4 shadow-lg ${
@@ -64,6 +86,35 @@ export default function Home() {
               >
                 <p className="text-sm md:text-base leading-relaxed whitespace-pre-wrap">{msg.content}</p>
               </div>
+
+              {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
+                <div className="max-w-[85%] md:max-w-[75%] mt-2">
+                  <button
+                    onClick={() => toggleSources(idx)}
+                    className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition"
+                  >
+                    <span>{expandedSources.has(idx) ? "▾" : "▸"}</span>
+                    {msg.sources.length} source{msg.sources.length > 1 ? "s" : ""}
+                  </button>
+
+                  {expandedSources.has(idx) && (
+                    <div className="mt-2 space-y-2">
+                      {msg.sources.map((src, sIdx) => (
+                        <div
+                          key={sIdx}
+                          className="bg-gray-700 border border-gray-600 rounded-xl p-3 text-xs text-gray-300"
+                        >
+                          <div className="flex justify-between mb-1">
+                            <span className="text-blue-300 font-medium">Page {src.page}</span>
+                            <span className="text-gray-400">Score: {src.score}</span>
+                          </div>
+                          <p className="leading-relaxed italic">"{src.snippet}"</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}
@@ -267,11 +318,16 @@ export default function Home() {
                   });
                 }
                 
-                // Handle sources at the end
-                if (data.done && data.sources) {
-                  console.log("Sources received:", data.sources);
-                  // Optional: Append sources to the message or show separately
-                  // For now, we just finish the text
+                if (data.done) {
+                  setMessages((prev) => {
+                    const newMsgs = [...prev];
+                    newMsgs[newMsgs.length - 1] = {
+                      role: "assistant",
+                      content: aiText,
+                      sources: data.sources ?? [],
+                    };
+                    return newMsgs;
+                  });
                 }
                 
                 if (data.error) {
