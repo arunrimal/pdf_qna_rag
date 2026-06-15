@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Technical Report: RAG-Based PDF Q&A Application</title>
+<style>
+  /* ── Base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue:    #2563eb;
+    --blue-dk: #1d4ed8;
+    --indigo:  #4f46e5;
+    --gray-50: #f9fafb;
+    --gray-100:#f3f4f6;
+    --gray-200:#e5e7eb;
+    --gray-300:#d1d5db;
+    --gray-600:#4b5563;
+    --gray-700:#374151;
+    --gray-800:#1f2937;
+    --gray-900:#111827;
+    --green:   #16a34a;
+    --amber:   #d97706;
+    --red:     #dc2626;
+    --purple:  #7c3aed;
+    --teal:    #0d9488;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--gray-800);
+    background: #ffffff;
+  }
+
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; color: var(--blue-dk); }
+
+  /* ── Layout ── */
+  .page-wrap {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ── Sidebar TOC ── */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    width: 270px;
+    height: 100vh;
+    background: var(--gray-900);
+    color: #e5e7eb;
+    overflow-y: auto;
+    padding: 0 0 2rem 0;
+    z-index: 100;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    background: var(--indigo);
+    padding: 1.25rem 1.25rem 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .sidebar-header .app-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #a5b4fc;
+    margin-bottom: 0.3rem;
+  }
+
+  .sidebar-header h2 {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.3;
+  }
+
+  .toc-section-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #6b7280;
+    padding: 1.25rem 1.25rem 0.4rem;
+  }
+
+  .toc-list { list-style: none; }
+
+  .toc-list li a {
+    display: block;
+    padding: 0.45rem 1.25rem;
+    font-size: 0.82rem;
+    color: #d1d5db;
+    border-left: 3px solid transparent;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    line-height: 1.4;
+  }
+
+  .toc-list li a:hover {
+    background: rgba(255,255,255,0.06);
+    border-left-color: var(--indigo);
+    color: #ffffff;
+    text-decoration: none;
+  }
+
+  .toc-list li a .num {
+    display: inline-block;
+    width: 1.3em;
+    font-weight: 700;
+    color: #818cf8;
+    flex-shrink: 0;
+  }
+
+  .toc-sub { list-style: none; }
+  .toc-sub li a {
+    padding-left: 2.4rem;
+    font-size: 0.77rem;
+    color: #9ca3af;
+  }
+  .toc-sub li a:hover { color: #e5e7eb; }
+
+  /* ── Main content ── */
+  .main {
+    margin-left: 270px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ── Cover ── */
+  .cover {
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4338ca 100%);
+    color: white;
+    padding: 5rem 4rem 4rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cover::before {
+    content: '';
+    position: absolute;
+    top: -80px; right: -80px;
+    width: 400px; height: 400px;
+    background: rgba(99,102,241,0.25);
+    border-radius: 50%;
+  }
+
+  .cover::after {
+    content: '';
+    position: absolute;
+    bottom: -60px; left: 10%;
+    width: 280px; height: 280px;
+    background: rgba(167,139,250,0.15);
+    border-radius: 50%;
+  }
+
+  .cover-badge {
+    display: inline-block;
+    background: rgba(165,180,252,0.2);
+    border: 1px solid rgba(165,180,252,0.4);
+    color: #c7d2fe;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    margin-bottom: 1.5rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  .cover h1 {
+    font-size: 2.4rem;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 1rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  .cover .subtitle {
+    font-size: 1rem;
+    color: #c7d2fe;
+    max-width: 560px;
+    margin-bottom: 2.5rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  .cover-stack {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .badge-blue   { background:#dbeafe; color:#1e40af; }
+  .badge-indigo { background:#e0e7ff; color:#3730a3; }
+  .badge-green  { background:#dcfce7; color:#166534; }
+  .badge-amber  { background:#fef3c7; color:#92400e; }
+  .badge-purple { background:#f3e8ff; color:#6b21a8; }
+  .badge-teal   { background:#ccfbf1; color:#115e59; }
+  .badge-red    { background:#fee2e2; color:#991b1b; }
+
+  .cover .badge {
+    background: rgba(255,255,255,0.12);
+    color: #e0e7ff;
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+
+  /* ── Content area ── */
+  .content {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 3rem 3rem 5rem;
+  }
+
+  /* ── Section headings ── */
+  .section-anchor {
+    display: block;
+    position: relative;
+    top: -80px;
+    visibility: hidden;
+  }
+
+  h2.section-title {
+    font-size: 1.65rem;
+    font-weight: 800;
+    color: var(--gray-900);
+    margin: 3.5rem 0 1rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 3px solid var(--indigo);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  h2.section-title .sec-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    background: var(--indigo);
+    color: white;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--gray-800);
+    margin: 2rem 0 0.75rem;
+  }
+
+  h4 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--gray-700);
+    margin: 1.5rem 0 0.5rem;
+  }
+
+  p { margin-bottom: 0.9rem; }
+
+  /* ── Pipeline diagram ── */
+  .pipeline {
+    background: var(--gray-900);
+    border-radius: 12px;
+    padding: 1.75rem 2rem;
+    margin: 1.5rem 0;
+    overflow-x: auto;
+  }
+
+  .pipeline pre {
+    color: #a5f3fc;
+    font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+    font-size: 0.82rem;
+    line-height: 1.8;
+    white-space: pre;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* ── Code blocks ── */
+  pre {
+    background: #1e293b;
+    border-radius: 8px;
+    padding: 1.1rem 1.25rem;
+    overflow-x: auto;
+    margin: 1rem 0 1.25rem;
+    border-left: 4px solid var(--indigo);
+  }
+
+  pre code {
+    font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+    font-size: 0.82rem;
+    color: #e2e8f0;
+    line-height: 1.7;
+    background: none;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+  }
+
+  code {
+    font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+    font-size: 0.83em;
+    background: var(--gray-100);
+    color: var(--indigo);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    border: 1px solid var(--gray-200);
+  }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; margin: 1.25rem 0; border-radius: 10px; border: 1px solid var(--gray-200); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
+
+  thead tr { background: var(--indigo); color: white; }
+  thead th { padding: 0.7rem 1rem; text-align: left; font-weight: 700; font-size: 0.8rem; letter-spacing: 0.03em; }
+
+  tbody tr { border-bottom: 1px solid var(--gray-100); transition: background 0.1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--gray-50); }
+  tbody td { padding: 0.65rem 1rem; vertical-align: top; }
+  tbody td:first-child { font-weight: 600; color: var(--gray-900); white-space: nowrap; }
+
+  /* ── Lists ── */
+  ul, ol { padding-left: 1.5rem; margin-bottom: 0.9rem; }
+  li { margin-bottom: 0.35rem; }
+  li > ul, li > ol { margin-top: 0.3rem; margin-bottom: 0.3rem; }
+
+  /* ── Info boxes ── */
+  .info-box {
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin: 1.25rem 0;
+    border-left: 4px solid;
+    font-size: 0.9rem;
+  }
+
+  .info-box.blue   { background:#eff6ff; border-color:#3b82f6; }
+  .info-box.green  { background:#f0fdf4; border-color:#22c55e; }
+  .info-box.amber  { background:#fffbeb; border-color:#f59e0b; }
+  .info-box.red    { background:#fef2f2; border-color:#ef4444; }
+  .info-box.purple { background:#faf5ff; border-color:#a855f7; }
+
+  .info-box-title {
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 0.4rem;
+  }
+
+  /* ── Q&A cards ── */
+  .qa-block {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    margin: 1.75rem 0;
+    overflow: hidden;
+  }
+
+  .qa-question {
+    background: linear-gradient(90deg, var(--indigo) 0%, #6366f1 100%);
+    color: white;
+    padding: 0.9rem 1.25rem;
+    font-weight: 700;
+    font-size: 0.92rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    line-height: 1.4;
+  }
+
+  .qa-question .q-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255,255,255,0.25);
+    border-radius: 6px;
+    width: 1.8rem;
+    height: 1.8rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    flex-shrink: 0;
+    margin-top: 0.05rem;
+  }
+
+  .qa-answer {
+    padding: 1.25rem 1.25rem 0.75rem;
+  }
+
+  .qa-answer p:last-child { margin-bottom: 0.5rem; }
+
+  /* ── Section category labels ── */
+  .category-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    margin: 2rem 0 1rem;
+  }
+
+  /* ── Divider ── */
+  hr {
+    border: none;
+    border-top: 1px solid var(--gray-200);
+    margin: 2.5rem 0;
+  }
+
+  /* ── Interview answer section cover ── */
+  .interview-cover {
+    background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%);
+    color: white;
+    padding: 3rem 4rem;
+    margin: 0 -3rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .interview-cover::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -40px;
+    width: 280px; height: 280px;
+    background: rgba(52,211,153,0.15);
+    border-radius: 50%;
+  }
+
+  .interview-cover h2 {
+    font-size: 1.6rem;
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+    position: relative;
+    z-index: 1;
+    border: none;
+    padding: 0;
+    color: white;
+  }
+
+  .interview-cover p {
+    color: #a7f3d0;
+    font-size: 0.92rem;
+    position: relative;
+    z-index: 1;
+    margin: 0;
+  }
+
+  /* ── Print / PDF ── */
+  @media print {
+    .sidebar { display: none; }
+    .main { margin-left: 0; }
+    .cover { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    h2.section-title { page-break-before: always; }
+    h2.section-title:first-of-type { page-break-before: avoid; }
+    .qa-block { page-break-inside: avoid; }
+    pre { page-break-inside: avoid; }
+    .table-wrap { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+<!-- ════════════════════════════════════════════
+     SIDEBAR — TABLE OF CONTENTS
+════════════════════════════════════════════ -->
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <div class="app-label">PDF Q&amp;A RAG</div>
+    <h2>Technical Report</h2>
+  </div>
+
+  <div class="toc-section-label">Report Sections</div>
+  <ul class="toc-list">
+    <li><a href="#sec1"><span class="num">1.</span> System Architecture</a>
+      <ul class="toc-sub">
+        <li><a href="#sec1-1">1.1 Ingestion Pipeline</a></li>
+        <li><a href="#sec1-2">1.2 Chunking</a></li>
+        <li><a href="#sec1-3">1.3 Embedding</a></li>
+        <li><a href="#sec1-4">1.4 Vector Storage</a></li>
+        <li><a href="#sec1-5">1.5 Retrieval</a></li>
+        <li><a href="#sec1-6">1.6 Generation</a></li>
+        <li><a href="#sec1-7">1.7 Design Decisions</a></li>
+      </ul>
+    </li>
+    <li><a href="#sec2"><span class="num">2.</span> Technologies Used</a></li>
+    <li><a href="#sec3"><span class="num">3.</span> Challenges Faced</a></li>
+    <li><a href="#sec4"><span class="num">4.</span> Limitations</a></li>
+    <li><a href="#sec5"><span class="num">5.</span> Improvements &amp; Future Work</a></li>
+    <li><a href="#sec6"><span class="num">6.</span> Industry Challenges</a></li>
+    <li><a href="#sec7"><span class="num">7.</span> Interview Q&amp;A</a>
+      <ul class="toc-sub">
+        <li><a href="#sec7-conceptual">Conceptual (Q1–Q6)</a></li>
+        <li><a href="#sec7-sysdesign">System Design (Q7–Q11)</a></li>
+        <li><a href="#sec7-debug">Debugging (Q12–Q15)</a></li>
+        <li><a href="#sec7-project">Project-Specific (Q16–Q20)</a></li>
+      </ul>
+    </li>
+    <li><a href="#sec8"><span class="num">8.</span> Interview Answer</a></li>
+  </ul>
+</nav>
+
+<!-- ════════════════════════════════════════════
+     MAIN CONTENT
+════════════════════════════════════════════ -->
+<main class="main">
+
+  <!-- COVER -->
+  <div class="cover">
+    <div class="cover-badge">Technical Report · 2025</div>
+    <h1>RAG-Based PDF Q&amp;A<br>Application</h1>
+    <p class="subtitle">End-to-end Retrieval-Augmented Generation system — from PDF ingestion to streaming answers.</p>
+    <div class="cover-stack">
+      <span class="badge">LlamaIndex</span>
+      <span class="badge">Gemini 2.5 Flash</span>
+      <span class="badge">Pinecone</span>
+      <span class="badge">FastAPI</span>
+      <span class="badge">Next.js</span>
+      <span class="badge">Vercel + Render</span>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ══════════════════════════════════════
+         SECTION 1 — SYSTEM ARCHITECTURE
+    ══════════════════════════════════════ -->
+    <span id="sec1" class="section-anchor"></span>
+    <h2 class="section-title"><span class="sec-num">1</span>System Architecture</h2>
+
+    <p>The application follows a <strong>Retrieval-Augmented Generation (RAG)</strong> pattern: rather than asking an LLM to answer from training knowledge alone, the system first retrieves relevant text chunks from the uploaded document and injects them as context into the prompt. This grounds the response in the actual document content.</p>
+
+    <div class="pipeline">
+<pre>[User] → Upload PDF
+            ↓
+       [FastAPI Backend]
+            ↓
+       Text Extraction (PyMuPDF + LlamaIndex SimpleDirectoryReader)
+            ↓
+       Chunking (LlamaIndex default node parser)
+            ↓
+       Embedding (Gemini gemini-embedding-001, 768-dim vectors)
+            ↓
+       Vector Storage (Pinecone, namespace = session_id)
+            ↓
+[User] → Ask Question
+            ↓
+       Query Embedding (same Gemini model)
+            ↓
+       Semantic Search (Pinecone cosine similarity, top-k nodes)
+            ↓
+       Context Assembly (retrieved chunks + chat history)
+            ↓
+       LLM Generation (Gemini 2.5 Flash)
+            ↓
+       Streaming Response (SSE tokens) → [Next.js Frontend]</pre>
+    </div>
+
+    <span id="sec1-1" class="section-anchor"></span>
+    <h3>1.1 Ingestion Pipeline</h3>
+    <p>When a user uploads a PDF:</p>
+    <ol>
+      <li><strong>Receive &amp; validate</strong>: The <code>/upload</code> endpoint accepts a <code>multipart/form-data</code> request. PyMuPDF (<code>fitz</code>) opens the file and counts pages — uploads exceeding 5 pages are rejected with HTTP 400.</li>
+      <li><strong>Save temporarily</strong>: The file is written to a system temp directory (<code>tempfile.mkdtemp()</code>).</li>
+      <li><strong>Text extraction</strong>: <code>SimpleDirectoryReader(input_files=[pdf_path]).load_data()</code> parses the PDF into LlamaIndex <code>Document</code> objects. Each document carries metadata: <code>page_label</code> and <code>file_name</code>.</li>
+      <li><strong>Cleanup</strong>: Temp files are deleted immediately after processing to avoid disk accumulation.</li>
+    </ol>
+
+    <span id="sec1-2" class="section-anchor"></span>
+    <h3>1.2 Chunking</h3>
+    <p>LlamaIndex's default node parser breaks <code>Document</code> objects into smaller <code>Node</code> objects (text chunks). These nodes preserve parent-document metadata and are the unit of embedding and retrieval. The chunking strategy uses LlamaIndex's internal defaults (typically ~1024 token chunks with overlap).</p>
+
+    <span id="sec1-3" class="section-anchor"></span>
+    <h3>1.3 Embedding</h3>
+    <p>Each node's text is passed to Google's <code>gemini-embedding-001</code> model via <code>GoogleGenAIEmbedding</code>, producing a <strong>768-dimensional dense vector</strong>. These vectors encode the semantic meaning of each chunk. Embedding is triggered automatically when <code>VectorStoreIndex.from_documents()</code> is called.</p>
+
+    <span id="sec1-4" class="section-anchor"></span>
+    <h3>1.4 Vector Storage</h3>
+    <p>Embeddings are stored in <strong>Pinecone</strong>, a managed vector database. Each user session gets its own <strong>Pinecone namespace</strong> (keyed by <code>session_id</code>), providing logical data isolation.</p>
+    <pre><code>vector_store = PineconeVectorStore(
+    pinecone_index=pinecone_index,
+    namespace=session_id   # Per-user isolation
+)</code></pre>
+
+    <span id="sec1-5" class="section-anchor"></span>
+    <h3>1.5 Retrieval</h3>
+    <p>When the user asks a question:</p>
+    <ol>
+      <li>The query is embedded with the same Gemini model.</li>
+      <li>Pinecone performs cosine similarity search within the user's namespace.</li>
+      <li>The top-k most semantically similar nodes are returned.</li>
+      <li>LlamaIndex assembles these nodes into a context window alongside the conversation history from <code>ChatMemoryBuffer</code> (capped at 3,900 tokens).</li>
+    </ol>
+
+    <span id="sec1-6" class="section-anchor"></span>
+    <h3>1.6 Generation</h3>
+    <p>The assembled context + query are passed to <strong>Gemini 2.5 Flash</strong> via LlamaIndex's <code>GoogleGenAI</code> wrapper. The chat engine operates in <code>context</code> mode with a system prompt that instructs the model to treat the PDF as ground truth for facts, while allowing creative latitude when the user asks to generate new content (e.g., a cover letter). Responses are streamed token-by-token using Server-Sent Events (SSE).</p>
+
+    <span id="sec1-7" class="section-anchor"></span>
+    <h3>1.7 Design Decisions &amp; Reasoning</h3>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Decision</th><th>Reasoning</th></tr></thead>
+      <tbody>
+        <tr><td>LlamaIndex as orchestration layer</td><td>Abstracts embedding, chunking, retrieval, and LLM calls into a unified pipeline, reducing boilerplate and enabling rapid iteration.</td></tr>
+        <tr><td>Pinecone for vector storage</td><td>Managed, serverless, with built-in namespace support for per-user isolation. No infrastructure to manage.</td></tr>
+        <tr><td>Namespace-based multi-tenancy</td><td>Simpler than running per-user indexes; Pinecone namespaces share one index but are logically separated.</td></tr>
+        <tr><td>Gemini for both embedding and LLM</td><td>Single API key, consistent provider, and <code>gemini-embedding-001</code> produces high-quality embeddings. Reduces vendor sprawl.</td></tr>
+        <tr><td>ChatMemoryBuffer (3,900 tokens)</td><td>Enables multi-turn conversations while bounding token usage to control cost and latency.</td></tr>
+        <tr><td>SSE streaming over WebSocket</td><td>SSE is simpler (unidirectional), HTTP-native, and sufficient for token streaming; WebSocket complexity is not needed.</td></tr>
+        <tr><td>5-page PDF limit</td><td>Controls embedding cost, Pinecone storage, and processing latency for a free-tier deployment.</td></tr>
+        <tr><td>Backend on Render, Frontend on Vercel</td><td>Vercel is optimized for Next.js; Render handles the long-running Python FastAPI process. Separation of concerns.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <hr>
+
+    <!-- ══════════════════════════════════════
+         SECTION 2 — TECHNOLOGIES USED
+    ══════════════════════════════════════ -->
+    <span id="sec2" class="section-anchor"></span>
+    <h2 class="section-title"><span class="sec-num">2</span>Technologies Used</h2>
+
+    <h3>Frontend</h3>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Technology</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td>Next.js 16</td><td>React framework with server-side rendering. Handles the chat UI, file upload form, and streaming response rendering.</td></tr>
+        <tr><td>TypeScript</td><td>Type-safe JavaScript. Reduces runtime bugs in the streaming parser and state management.</td></tr>
+        <tr><td>Tailwind CSS</td><td>Utility-first CSS. Rapid UI development without custom stylesheets.</td></tr>
+        <tr><td>Fetch API (SSE)</td><td>Native browser API used to consume the streaming <code>/chat/stream</code> endpoint token by token.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>Backend</h3>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Technology</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td>Python 3.11</td><td>Core runtime.</td></tr>
+        <tr><td>FastAPI</td><td>Async HTTP framework. Provides the <code>/upload</code>, <code>/chat</code>, <code>/chat/stream</code>, and <code>/clear</code> endpoints. Async generator support enables SSE streaming.</td></tr>
+        <tr><td>Uvicorn</td><td>ASGI server. Handles concurrent connections efficiently for streaming use cases.</td></tr>
+        <tr><td>PyMuPDF (fitz)</td><td>PDF page counting and validation before ingestion.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>AI / ML Stack</h3>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Technology</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td>LlamaIndex</td><td>The RAG orchestration framework. Provides <code>SimpleDirectoryReader</code> (ingestion), <code>VectorStoreIndex</code> (embedding + indexing), <code>ChatMemoryBuffer</code> (conversation history), and <code>ChatEngine</code> (retrieval + generation loop).</td></tr>
+        <tr><td>Gemini 2.5 Flash</td><td>LLM for answer generation. Chosen for speed, strong instruction-following, and cost efficiency relative to larger models.</td></tr>
+        <tr><td>gemini-embedding-001</td><td>Google's text embedding model. Converts text chunks and queries into 768-dimensional semantic vectors.</td></tr>
+        <tr><td>Pinecone</td><td>Managed vector database. Stores embeddings persistently with namespace-based tenant isolation. Supports serverless, pay-per-query billing.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>Infrastructure</h3>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Technology</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td>Vercel</td><td>Hosts the Next.js frontend. Provides edge CDN, automatic HTTPS, and preview deployments per branch.</td></tr>
+        <tr><td>Render</td><td>Hosts the FastAPI backend as a Docker container. Free tier with cold-start behavior after 15 minutes of inactivity.</td></tr>
+        <tr><td>python-dotenv / Pydantic BaseSettings</td><td>Environment variable management. Secrets (API keys) are loaded at startup and never hardcoded.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <hr>
+
+    <!-- ══════════════════════════════════════
+         SECTION 3 — CHALLENGES
+    ══════════════════════════════════════ -->
+    <span id="sec3" class="section-anchor"></span>
+    <h2 class="section-title"><span class="sec-num">3</span>Challenges Faced</h2>
+
+    <h3>Development Challenges</h3>
+
+    <div class="info-box purple">
+      <div class="info-box-title">Challenge 1 — Sync/Async Mismatch in LlamaIndex</div>
+      <p>FastAPI is async-first, but LlamaIndex's <code>ChatEngine.chat()</code> and <code>stream_chat()</code> are synchronous. Calling a sync blocking function directly from an <code>async</code> endpoint blocks the event loop, breaking concurrent request handling.</p>
+      <p><strong>Solution:</strong></p>
+      <pre><code>loop = asyncio.get_event_loop()
+response = await loop.run_in_executor(None, lambda: engine.chat(query))</code></pre>
+      <p style="margin:0">This offloads the blocking call to a worker thread while the event loop remains free to handle other requests.</p>
+    </div>
+
+    <div class="info-box blue">
+      <div class="info-box-title">Challenge 2 — Streaming with Sync Generators</div>
+      <p style="margin:0"><code>engine.stream_chat()</code> returns a synchronous generator (<code>response_gen</code>). Converting this to an async SSE stream required wrapping it in an <code>async def event_generator()</code> that iterates the sync generator and yields SSE-formatted strings.</p>
+    </div>
+
+    <div class="info-box amber">
+      <div class="info-box-title">Challenge 3 — Session State Management</div>
+      <p style="margin:0">There is no database for session state — chat engines are stored in-process memory (<code>active_sessions</code> dict). This creates simplicity but also risk: a server restart wipes all active sessions. The Pinecone embeddings persist, but the <code>ChatMemoryBuffer</code> (conversation history) is lost.</p>
+    </div>
+
+    <div class="info-box blue">
+      <div class="info-box-title">Challenge 4 — Source Metadata Parsing Fragility</div>
+      <p style="margin:0">LlamaIndex's source node format is not fully stable across versions. The source extraction code has multiple fallback paths (<code>try/except</code>) because the attributes (<code>node</code>, <code>text</code>, <code>metadata</code>) were not always present in the same location across different response types.</p>
+    </div>
+
+    <h3>Deployment Challenges</h3>
+
+    <div class="info-box red">
+      <div class="info-box-title">Challenge 5 — Cold Starts on Render Free Tier</div>
+      <p>Render's free tier spins down containers after 15 minutes of inactivity. The first request after a cold start can take 30–60 seconds, which appears to the user as a hang.</p>
+      <p><strong>Mitigations:</strong></p>
+      <ul style="margin:0">
+        <li>Upgrade to a paid Render tier (always-on).</li>
+        <li>Use an uptime monitoring service (e.g., UptimeRobot) to ping the backend every 10 minutes.</li>
+      </ul>
+    </div>
+
+    <div class="info-box amber">
+      <div class="info-box-title">Challenge 6 — CORS Configuration</div>
+      <p style="margin:0">The FastAPI backend must explicitly allow the Vercel frontend origin. Misconfigured CORS silently fails in the browser with an opaque network error. The current implementation uses a permissive CORS policy (<code>allow_origins=["*"]</code>) acceptable for a demo but must be tightened for production.</p>
+    </div>
+
+    <div class="info-box blue">
+      <div class="info-box-title">Challenge 7 — Environment Variable Management</div>
+      <p style="margin:0">Vercel uses <code>NEXT_PUBLIC_</code> prefixed variables for client-side exposure. The backend URL must be set as <code>NEXT_PUBLIC_API_URL</code>. Forgetting the prefix means the variable is server-side only and unavailable to browser fetch calls.</p>
+    </div>
+
+    <div class="info-box blue">
+      <div class="info-box-title">Challenge 8 — Pinecone Index Initialization Race Condition</div>
+      <p style="margin:0">The index creation code checks <code>if INDEX_NAME not in pc.list_indexes().names()</code> before creating. On first deployment, the index may not be fully ready when the first request arrives. The <code>wait_until_ready=True</code> flag mitigates this but adds startup latency.</p>
+    </div>
+
+    <hr>
+
+    <!-- ══════════════════════════════════════
+         SECTION 4 — LIMITATIONS
+    ══════════════════════════════════════ -->
+    <span id="sec4" class="section-anchor"></span>
+    <h2 class="section-title"><span class="sec-num">4</span>Limitations</h2>
+
+    <h3>RAG-Specific Limitations</h3>
+    <ol>
+      <li><p><strong>Retrieval errors (the core RAG failure mode)</strong><br>The system can only answer from chunks that were successfully retrieved. If the relevant information is poorly chunked, semantically distant from the query phrasing, or beyond the top-k cutoff, the answer will be wrong or incomplete — even though the document contains the answer.</p></li>
+      <li><p><strong>Hallucination at boundaries</strong><br>When retrieved context is insufficient, Gemini 2.5 Flash may fill gaps with plausible-sounding but fabricated content. The system prompt instructs the model to "stick strictly to context," but LLMs can still confabulate when context is thin.</p></li>
+      <li><p><strong>Chunk boundary problems</strong><br>If a key piece of information spans two chunks, neither chunk alone may score high enough on retrieval. The answer is "in" the document but the retrieval system cannot surface it cleanly.</p></li>
+      <li><p><strong>Context window limits</strong><br>The 3,900-token <code>ChatMemoryBuffer</code> means that in long conversations, early exchanges are dropped, potentially losing important context.</p></li>
+      <li><p><strong>Single-document restriction</strong><br>The current architecture associates one session with one PDF. Cross-document Q&A is not supported.</p></li>
+      <li><p><strong>5-page limit</strong><br>Substantial documents routinely exceed 5 pages. This is a practical cost constraint but significantly restricts real-world utility.</p></li>
+    </ol>
+
+    <h3>Tool / Framework Limitations</h3>
+    <ol>
+      <li><p><strong>LlamaIndex abstraction opacity</strong><br>LlamaIndex simplifies the RAG pipeline but hides internals. Debugging retrieval quality or tuning similarity thresholds requires reaching past the abstraction.</p></li>
+      <li><p><strong>No re-ranking step</strong><br>The system uses raw embedding similarity for retrieval. There is no cross-encoder reranker to refine the top-k results.</p></li>
+      <li><p><strong>Pinecone free tier constraints</strong><br>Heavy usage or large PDFs will exhaust quotas and cause failures.</p></li>
+      <li><p><strong>Gemini API rate limits</strong><br>High traffic causes 429 errors with no built-in retry logic in the current implementation.</p></li>
+      <li><p><strong>Ephemeral session state</strong><br><code>active_sessions</code> lives in process memory with no TTL or eviction policy. Long-running deployments accumulate memory from sessions never explicitly cleared.</p></li>
+    </ol>
+
+    <hr>
+
+    <!-- ══════════════════════════════════════
+         SECTION 5 — IMPROVEMENTS
+    ══════════════════════════════════════ -->
+    <span id="sec5" class="section-anchor"></span>
+    <h2 class="section-title"><span class="sec-num">5</span>Improvements &amp; Future Work</h2>
+
+    <h3>Technical Improvements</h3>
+
+    <h4>1. Add a Reranker</h4>
+    <p>After initial vector retrieval, pass the top-k nodes through a cross-encoder reranker (e.g., Cohere Rerank, or a local <code>cross-encoder/ms-marco-MiniLM</code> model). Rerankers use both the query and the chunk together for scoring, yielding much higher retrieval precision than embedding similarity alone.</p>
+
+    <h4>2. Hybrid Retrieval (Semantic + Keyword)</h4>
+    <p>Combine dense vector search (current) with BM25 keyword search. Pinecone supports sparse-dense hybrid queries. This handles cases where exact keyword matches (names, IDs, technical terms) outperform semantic similarity.</p>
+
+    <h4>3. Sentence Window Retrieval</h4>
+    <p>Store embeddings at the sentence level but retrieve the surrounding window (e.g., 3 sentences before/after). This gives fine-grained retrieval precision without losing surrounding context needed for coherent answers.</p>
+
+    <h4>4. Persistent Session Storage</h4>
+    <p>Replace the in-memory <code>active_sessions</code> dict with Redis. This enables survival across server restarts, TTL-based session expiration, and horizontal scaling.</p>
+
+    <h4>5. Explicit Chunk Size Tuning</h4>
+    <pre><code>from llama_index.core.node_parser import SentenceSplitter
+node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=64)</code></pre>
+
+    <h4>6. Evaluation Pipeline</h4>
+    <p>Implement automated RAG evaluation using RAGAS or TruLens, measuring <strong>Faithfulness</strong>, <strong>Answer Relevancy</strong>, and <strong>Context Recall</strong>.</p>
+
+    <h3>Scalability &amp; Production Readiness</h3>
+    <ol>
+      <li><strong>Authentication &amp; authorization</strong> — Add JWT-based auth. Session IDs should be tied to authenticated users.</li>
+      <li><strong>File validation</strong> — MIME type checking, file size limits (10 MB max), and virus scanning.</li>
+      <li><strong>Queue-based ingestion</strong> — Move PDF processing to a background job queue (Celery + Redis or AWS SQS). The <code>/upload</code> endpoint returns a job ID immediately.</li>
+      <li><strong>Observability</strong> — Structured logging with <code>session_id</code>, <code>query</code>, <code>latency_ms</code>, <code>tokens_used</code>.</li>
+      <li><strong>Cost controls</strong> — Per-session token caps and Redis-based rate limiting per user.</li>
+      <li><strong>Query caching</strong> — Cache embeddings for repeated queries using query hash as the Redis key.</li>
+      <li><strong>Upgrade hosting</strong> — Google Cloud Run with <code>min-instances=1</code> or AWS ECS Fargate to eliminate cold-start latency.</li>
+    </ol>
+
+    <hr>
+
+    <!-- ══════════════════════════════════════
+         SECTION 6 — INDUSTRY CHALLENGES
+    ══════════════════════════════════════ -->
+    <span id="sec6" class="section-anchor"></span>
+    <h2 class="section-title"><span class="sec-num">6</span>Industry Challenges in RAG Systems</h2>
+
+    <h3>Retrieval Quality</h3>
+    <p><strong>Embedding space collisions</strong>: Two semantically different sentences can produce similar embeddings, causing irrelevant chunks to score higher than relevant ones with no way to detect it at runtime.</p>
+    <p><strong>Query-document mismatch</strong>: User queries are often short and conversational; indexed documents are long and formal. Query expansion and HyDE (Hypothetical Document Embedding) address this.</p>
+    <p><strong>Top-k sensitivity</strong>: Too few chunks = missing relevant content. Too many = diluting the context with noise, inflating token costs, and degrading generation quality.</p>
+
+    <h3>Latency &amp; Cost</h3>
+    <p><strong>Embedding latency</strong>: Every query requires an embedding API call before retrieval. At scale, this adds 100–300 ms per request. Caching embeddings for repeated queries mitigates this.</p>
+    <p><strong>Generation latency</strong>: Large context windows slow LLM generation. Streaming masks this perceptually, but time-to-first-token is still a user experience factor.</p>
+    <p><strong>Cost at scale</strong>: Fine-tuning a smaller open-source embedding model (e.g., <code>bge-small-en</code>) for self-hosted embeddings can reduce cost by 10–100x.</p>
+
+    <h3>Data Freshness</h3>
+    <p><strong>Static index problem</strong>: Once a PDF is indexed, the embeddings are fixed. If the source document is updated, old embeddings remain stale. Production systems need index update pipelines with document versioning.</p>
+
+    <h3>Hallucination &amp; Faithfulness</h3>
+    <p><strong>Confident wrong answers</strong>: LLMs generate fluent text even when retrieved context is insufficient. Without a faithfulness layer, users cannot distinguish grounded answers from fabrications.</p>
+    <p><strong>Instruction-following fragility</strong>: "Answer only from the document" is a soft constraint. Adversarial queries or edge cases can cause the model to override the instruction.</p>
+
+    <h3>Evaluation Difficulty</h3>
+    <p><strong>No ground truth</strong>: For most document Q&A tasks, there is no labeled dataset of question-answer pairs. Building an evaluation set requires human annotators or LLM-as-judge (which introduces its own biases).</p>
+    <p><strong>Distribution shift</strong>: A RAG system that works on test PDFs may fail on user-uploaded PDFs with different formatting, languages, or domains.</p>
+
+    <h3>Chunking Sensitivity</h3>
+    <p><strong>The "right" chunk size does not exist</strong>: Optimal chunk size varies by document type. A single fixed chunk size is always a compromise.</p>
+    <p><strong>Table and figure blindness</strong>: Standard text chunkers ignore tables, figures, and charts. A PDF where key numbers are in a table will produce chunks that either omit the table entirely or include it as unstructured text the embedding model cannot reliably interpret.</p>
+
+    <hr>
+
+    <!-- ══════════════════════════════════════
+         SECTION 7 — INTERVIEW Q&A
+    ══════════════════════════════════════ -->
+    <span id="sec7" class="section-anchor"></span>
+    <h2 class="section-title"><span class="sec-num">7</span>Interview Preparation — Questions &amp; Answers</h2>
+
+    <!-- Conceptual -->
+    <span id="sec7-conceptual" class="section-anchor"></span>
+    <div class="category-label" style="background:#ede9fe;color:#6d28d9;">Conceptual Questions</div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q1</span>What is RAG and when would you use it instead of fine-tuning?</div>
+      <div class="qa-answer">
+        <p>RAG (Retrieval-Augmented Generation) is a pattern where, instead of relying solely on an LLM's training knowledge, you retrieve relevant external documents at inference time and inject them as context into the prompt. The model then generates an answer grounded in that retrieved content.</p>
+        <p><strong>Use RAG when:</strong></p>
+        <ul>
+          <li>Your knowledge changes frequently (new documents, updated policies). You can re-index without retraining.</li>
+          <li>You need source attribution — you can cite the exact chunks used.</li>
+          <li>Your data is private and can't be in training data.</li>
+          <li>You need to support multiple knowledge domains simultaneously.</li>
+          <li>You have limited budget (no GPU training runs).</li>
+        </ul>
+        <p><strong>Use fine-tuning when:</strong></p>
+        <ul>
+          <li>You need a specific output style, tone, or format that RAG can't teach through prompting.</li>
+          <li>The knowledge is stable over time and doesn't change.</li>
+          <li>Latency is critical — there's no retrieval step, so inference is faster.</li>
+          <li>You need to teach the model a new capability (not just knowledge), like a new reasoning pattern.</li>
+        </ul>
+        <p><strong>The key distinction</strong>: RAG gives the model access to external knowledge at runtime; fine-tuning bakes knowledge into the model weights at training time. For a PDF Q&A app, RAG is clearly correct — the documents are user-provided and change with every upload.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q2</span>How does your chunking strategy affect retrieval quality?</div>
+      <div class="qa-answer">
+        <p>Chunking is one of the most impactful — and most underappreciated — decisions in a RAG pipeline.</p>
+        <ul>
+          <li><strong>Chunk size too small (e.g., 128 tokens):</strong> High retrieval precision but each chunk lacks surrounding context. The LLM receives a fragment without enough information to synthesize a complete answer.</li>
+          <li><strong>Chunk size too large (e.g., 2048 tokens):</strong> Each chunk contains a lot of context, but the embedding averages over a large piece of text. A chunk about both "Project A" and "Project B" may rank low for a query about "Project A" because the embedding is diluted.</li>
+          <li><strong>Chunk overlap:</strong> Prevents information loss at boundaries. If a key sentence falls at the end of chunk 1 and the beginning of chunk 2, overlap ensures at least one chunk captures it cleanly.</li>
+        </ul>
+        <p>In this project, LlamaIndex defaults (~1024 tokens) are used. For a resume or short PDF, smaller chunks (256–512 tokens) would work better since information is dense and query-specific. The ideal approach is to tune chunk size experimentally using retrieval evaluation metrics.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q3</span>What is the difference between sparse and dense retrieval? When would you use BM25 over embeddings?</div>
+      <div class="qa-answer">
+        <ul>
+          <li><strong>Dense retrieval</strong> (what this project uses): Encodes both query and documents as continuous vectors. Captures semantic similarity — "automobile" matches "car" even though the words differ.</li>
+          <li><strong>Sparse retrieval (BM25/TF-IDF)</strong>: Represents documents as bags of words with weighted frequencies. Captures exact lexical overlap.</li>
+        </ul>
+        <p><strong>Use BM25 (or hybrid) when:</strong> Queries contain specific identifiers — names, product IDs, error codes, technical terms, dates. Dense embeddings may blur these specifics. Example: "What is the error code E404 handling?" — BM25 will exactly match "E404"; embeddings might retrieve generic error-handling sections.</p>
+        <p><strong>Best practice in production:</strong> Use hybrid retrieval — a weighted combination of both scores. Pinecone supports this natively. Most industry RAG systems outperform pure dense or pure sparse retrieval with a hybrid approach.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q4</span>How do you evaluate a RAG system? What metrics do you use?</div>
+      <div class="qa-answer">
+        <p><strong>RAGAS (Retrieval Augmented Generation Assessment):</strong></p>
+        <ul>
+          <li><strong>Faithfulness</strong>: Are all claims in the generated answer supported by the retrieved context? (Measures hallucination)</li>
+          <li><strong>Answer Relevancy</strong>: Does the answer actually address the question?</li>
+          <li><strong>Context Precision</strong>: Of the retrieved chunks, how many were actually relevant? (Measures retrieval noise)</li>
+          <li><strong>Context Recall</strong>: Were all the relevant chunks retrieved? (Measures retrieval completeness)</li>
+        </ul>
+        <p><strong>TruLens</strong>: Wraps the full RAG pipeline and evaluates each step (retrieval, generation) using an LLM-as-judge.</p>
+        <p>For this project specifically, you could evaluate by creating a set of (question, expected answer, page number) triples for a test PDF, running them through the pipeline, and comparing retrieved sources and answers.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q5</span>What is HyDE and when is it useful?</div>
+      <div class="qa-answer">
+        <p>HyDE stands for <strong>Hypothetical Document Embedding</strong>. Instead of embedding the raw user query and searching for similar chunks, HyDE works in two steps:</p>
+        <ol>
+          <li>Ask the LLM to generate a <strong>hypothetical answer</strong> to the query — a short paragraph that looks like it could be from the document.</li>
+          <li>Embed that hypothetical answer and use it as the search vector.</li>
+        </ol>
+        <p><strong>Why this works:</strong> A short user query like "What are John's skills?" may not embed close to the chunk in a resume that says "Proficient in Python, React, and SQL." But a hypothetical answer — "John is proficient in Python, React, and SQL" — will embed very close to that chunk.</p>
+        <p><strong>When to use HyDE:</strong> Queries are short, vague, or conversational while documents are formal and dense. When direct query embedding gives poor retrieval recall.</p>
+        <p><strong>Tradeoff:</strong> HyDE adds an extra LLM call before retrieval, increasing latency and cost. Not worth it for simple factual queries where the query and document phrasing naturally align.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q6</span>How would you handle a PDF with tables and figures?</div>
+      <div class="qa-answer">
+        <p>Standard text extraction (PyMuPDF + LlamaIndex defaults) treats tables as flat text strings or skips them entirely, which breaks semantic retrieval for numeric/tabular data.</p>
+        <p><strong>For tables:</strong> Use a specialized parser — <strong>LlamaParse</strong>, <strong>Azure Document Intelligence</strong>, or <strong>Unstructured.io</strong> — which extract tables as markdown or structured JSON. Store each table as a separate node with metadata indicating it's a table.</p>
+        <p><strong>For figures/charts:</strong> Use a multimodal embedding model (e.g., GPT-4 Vision, Gemini Vision) to generate a text caption for each figure. Store the caption as a node linked to the figure's location in the PDF.</p>
+        <p><strong>For complex PDFs (mixed content):</strong> Use a layout-aware parser that understands reading order, column layouts, and headers — standard PDF text extraction reads left-to-right without layout context and produces garbled text from multi-column documents.</p>
+      </div>
+    </div>
+
+    <!-- System Design -->
+    <span id="sec7-sysdesign" class="section-anchor"></span>
+    <div class="category-label" style="background:#dbeafe;color:#1e40af;">System Design Questions</div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q7</span>How would you scale this to handle 10,000 concurrent users?</div>
+      <div class="qa-answer">
+        <p><strong>Session state bottleneck:</strong> The in-memory <code>active_sessions</code> dict is on one server. Fix: move session state to <strong>Redis</strong> with TTL-based expiration. All backend instances share the same Redis cluster.</p>
+        <p><strong>Horizontal scaling:</strong> Run multiple FastAPI instances behind a load balancer (AWS ALB, Nginx). Since state is now in Redis, any instance can serve any session.</p>
+        <p><strong>Ingestion bottleneck:</strong> PDF processing is synchronous in the request handler. Fix: move to a <strong>job queue</strong> (Celery + Redis, or AWS SQS + Lambda). The <code>/upload</code> endpoint returns a job ID; the frontend polls <code>/status/{job_id}</code>.</p>
+        <p><strong>Pinecone:</strong> Already managed and scales automatically. No changes needed.</p>
+        <p><strong>Gemini API rate limits:</strong> Implement per-user rate limiting (20 queries/hour) using a Redis sliding window counter. Add retry logic with exponential backoff for 429 errors.</p>
+        <p><strong>Embedding cost at scale:</strong> Cache embeddings for repeated queries. Hash the query text + namespace as a Redis key; on cache hit, skip the Gemini embedding call.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q8</span>How would you handle multi-document Q&amp;A?</div>
+      <div class="qa-answer">
+        <p><strong>Option 1 — Single namespace, multi-document:</strong> Allow uploading multiple PDFs to the same session. Tag each chunk's metadata with <code>document_id</code> and <code>filename</code>. At retrieval time, Pinecone returns the most relevant chunks across all documents.</p>
+        <p><strong>Option 2 — Separate namespaces, routing layer:</strong> Each document gets its own namespace. A router LLM determines which namespace(s) to query based on the question. Results are merged and re-ranked before generation.</p>
+        <p><strong>Challenges:</strong> Context window fills up faster when combining multiple documents. Attribution becomes harder. Re-ranking is critical when results come from multiple sources.</p>
+        <p>For this project, Option 1 is simpler to implement — just remove the "one session = one PDF" constraint and allow multiple uploads under the same <code>session_id</code>.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q9</span>How would you update the knowledge base when a document changes?</div>
+      <div class="qa-answer">
+        <p><strong>Track document versions:</strong> Store a hash (SHA-256) of each document's content in a database. On re-upload, compare hashes. If unchanged, skip re-ingestion. If changed, trigger the update pipeline.</p>
+        <p><strong>Update pipeline:</strong></p>
+        <ol>
+          <li>Delete all vectors in Pinecone associated with the old document (using metadata filter <code>document_id = X</code>).</li>
+          <li>Re-ingest the new version: extract, chunk, embed, store.</li>
+          <li>Update the version hash in the database.</li>
+        </ol>
+        <p><strong>Granular updates:</strong> Track which pages changed (compare page-level hashes). Only re-embed the changed pages, not the entire document.</p>
+        <p><strong>Pinecone caveat:</strong> Pinecone doesn't support update-in-place for vectors. You must delete and re-insert.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q10</span>How would you add source attribution and citations to every answer?</div>
+      <div class="qa-answer">
+        <p>Source attribution is already partially implemented — the backend extracts <code>page_label</code> and <code>file_name</code> from node metadata and returns them in the API response.</p>
+        <p><strong>To make it production-grade:</strong></p>
+        <ol>
+          <li><strong>Chunk-level IDs:</strong> Assign a unique ID to each chunk at ingestion time. Store the ID alongside the chunk in Pinecone metadata.</li>
+          <li><strong>Citation tracking in generation:</strong> After streaming completes, map each claim in the answer to the source chunk — either via post-hoc attribution (ask the LLM) or structured generation (prompt the LLM to output JSON with citations inline).</li>
+          <li><strong>UI rendering:</strong> Render source cards below the answer — showing the page number, a snippet of the retrieved text, and a visual indicator that the answer is grounded.</li>
+          <li><strong>Faithfulness check:</strong> After generation, verify that every sentence in the answer is entailed by at least one retrieved source. Flag or filter answers that fail this check.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q11</span>How would you implement access control so users can only query their own documents?</div>
+      <div class="qa-answer">
+        <p><strong>Authentication layer:</strong> Add JWT-based auth (e.g., using <code>python-jose</code> on the backend, <code>NextAuth.js</code> on the frontend). Every request must include a valid JWT in the <code>Authorization</code> header. The backend extracts <code>user_id</code> from the JWT payload.</p>
+        <p><strong>Session ownership:</strong> Store <code>session_id → user_id</code> mapping in a database (or Redis). On every <code>/chat</code> and <code>/clear</code> request, verify that the JWT's <code>user_id</code> matches the session's owner. If not, return HTTP 403 Forbidden.</p>
+        <p><strong>Pinecone namespace security:</strong> The namespace is currently the <code>session_id</code>. With auth, tie it to <code>user_id:session_id</code> for an extra layer. This ensures that even if the backend code has a bug, a user's namespace is cryptographically tied to their identity.</p>
+        <p><strong>Additional hardening:</strong> Rate limit per <code>user_id</code> to prevent one user from exhausting quotas. Log all access with <code>user_id</code> for auditability.</p>
+      </div>
+    </div>
+
+    <!-- Debugging -->
+    <span id="sec7-debug" class="section-anchor"></span>
+    <div class="category-label" style="background:#fef3c7;color:#92400e;">Debugging &amp; Tradeoffs Questions</div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q12</span>A user says the system gave a wrong answer that was actually in the document. What would you investigate?</div>
+      <div class="qa-answer">
+        <p>This is a classic <strong>retrieval failure</strong>, not a generation failure. The LLM can only answer from what was retrieved.</p>
+        <p><strong>Step 1: Log and inspect retrieved chunks</strong> — Add logging in the <code>/chat</code> endpoint to record which source nodes were retrieved for the query, including their similarity scores. Check: was the chunk containing the correct answer actually retrieved?</p>
+        <p><strong>Step 2: Diagnose retrieval failure</strong></p>
+        <ul>
+          <li><strong>Query phrasing mismatch</strong>: The user asked "When was John born?" but the document says "Date of birth: March 1990." Fix: query expansion.</li>
+          <li><strong>Chunk boundary split</strong>: The answer spans two chunks. Fix: increase chunk overlap or use sentence window retrieval.</li>
+          <li><strong>Below top-k cutoff</strong>: The correct chunk was retrieved at rank 6 but only top-5 are used. Fix: increase k, or add a reranker.</li>
+        </ul>
+        <p><strong>Step 3: Check embedding quality</strong> — Try retrieving with a slightly rephrased query. If results change dramatically, the embedding model is sensitive to query wording. Consider HyDE.</p>
+        <p><strong>Step 4: Check generation</strong> — If the correct chunk WAS retrieved, check if the LLM ignored it. Fix: add a faithfulness check, reduce k to reduce noise.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q13</span>Your retrieval latency increased from 100ms to 800ms after adding 10,000 documents. What would you check?</div>
+      <div class="qa-answer">
+        <ul>
+          <li><strong>Check 1: Pinecone query latency</strong> — Use Pinecone's console to see query latency directly. Check if you've hit the free tier request limits causing throttling.</li>
+          <li><strong>Check 2: Embedding latency</strong> — The query must be embedded before Pinecone search. Check Gemini API response times separately. If Gemini is slow, implement embedding caching.</li>
+          <li><strong>Check 3: Network latency</strong> — Are the backend (Render) and Pinecone (AWS us-east-1) in the same region? Cross-region calls add 50–150ms.</li>
+          <li><strong>Check 4: Top-k post-processing</strong> — With more documents, the LlamaIndex post-retrieval processing may be slower. Profile the Python code to find the bottleneck.</li>
+          <li><strong>Check 5: Index type</strong> — Pinecone serverless uses ANN. With 10K vectors, ANN is trivially fast. If using a legacy pod-based index, check the pod capacity.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q14</span>The LLM is ignoring the retrieved context and answering from its training knowledge. How would you fix this?</div>
+      <div class="qa-answer">
+        <p>This is a <strong>prompt engineering and context positioning</strong> problem. LLMs have an attention bias — content at the beginning and end of the context receives more attention than content in the middle ("lost in the middle" problem).</p>
+        <p><strong>Fix 1: Rewrite the system prompt</strong></p>
+        <pre><code>You MUST answer exclusively from the provided document excerpts below.
+If the answer is not in the excerpts, say "I don't know based on the provided document."
+Do NOT use your training knowledge for factual claims.</code></pre>
+        <p><strong>Fix 2: Restructure context positioning</strong> — Place retrieved chunks at the beginning of the user message (before the question). The model pays more attention to recent content.</p>
+        <p><strong>Fix 3: Reduce temperature</strong> — Lower temperature (e.g., 0.1) makes the model more deterministic and less likely to drift toward confident training knowledge.</p>
+        <p><strong>Fix 4: Reduce context noise</strong> — If k is large and many retrieved chunks are irrelevant, the model may default to training knowledge. Reduce k or add a reranker.</p>
+        <p><strong>Fix 5: Add output validation</strong> — After generation, run a faithfulness check using an LLM-as-judge or semantic similarity between each answer sentence and the source chunks.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q15</span>How would you reduce cost by 50% without degrading quality?</div>
+      <div class="qa-answer">
+        <ul>
+          <li><strong>Cache embeddings for repeated queries (~20–30% savings)</strong> — Hash the query text. If the same query is asked again, return the cached embedding instead of calling Gemini.</li>
+          <li><strong>Reduce k (fewer retrieved chunks)</strong> — Each chunk added to context increases the prompt token count. If k=5 is current, experiment with k=3. Use retrieval evaluation to confirm quality doesn't degrade.</li>
+          <li><strong>Self-host the embedding model (~40–60% savings)</strong> — Replace <code>gemini-embedding-001</code> with a self-hosted open-source model (<code>BAAI/bge-small-en-v1.5</code>, 33M parameters).</li>
+          <li><strong>Cheaper model for simple queries</strong> — Implement query classification: simple factual questions go to a cheaper/faster model; complex synthesis questions go to Gemini 2.5 Flash.</li>
+          <li><strong>Prompt compression</strong> — Use LLMLingua to compress the retrieved context before injecting it into the prompt. Compressed context can be 50–70% smaller with minimal information loss.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Project-Specific -->
+    <span id="sec7-project" class="section-anchor"></span>
+    <div class="category-label" style="background:#d1fae5;color:#065f46;">Project-Specific Questions</div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q16</span>Why did you choose Pinecone over a local vector store like FAISS or Chroma?</div>
+      <div class="qa-answer">
+        <p><strong>FAISS:</strong> In-memory, requires the entire index to be loaded into RAM on each server start. No persistence by default. No namespace support — building per-user isolation would require separate FAISS indexes, one per user. Impractical for multi-user production.</p>
+        <p><strong>Chroma:</strong> Persistent (disk-based), simpler than FAISS for production use. Has collection-based isolation, but runs as a local service — adds operational complexity on Render. No managed cloud offering at the time of this project.</p>
+        <p><strong>Pinecone:</strong> Fully managed — no infrastructure to operate. Built-in namespace support (perfect for per-user isolation). Persistent across server restarts. Pay-per-query serverless model. Integrates natively with LlamaIndex via <code>PineconeVectorStore</code>.</p>
+        <p><strong>The main tradeoff:</strong> Pinecone has vendor lock-in and free tier limits. For a production system with predictable load, a self-hosted Qdrant or Weaviate instance on a managed Kubernetes cluster would be more cost-effective at scale.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q17</span>Why Gemini 2.5 Flash instead of GPT-4 or Claude?</div>
+      <div class="qa-answer">
+        <p><strong>Gemini 2.5 Flash advantages for this project:</strong></p>
+        <ul>
+          <li><strong>Single API key for both embedding and generation.</strong> Using <code>gemini-embedding-001</code> and <code>gemini-2.5-flash</code> from the same provider eliminates cross-provider complexity.</li>
+          <li><strong>Speed.</strong> Flash is optimized for low-latency inference — critical for a streaming chat application where time-to-first-token matters.</li>
+          <li><strong>Cost.</strong> Flash is significantly cheaper per token than GPT-4 Turbo or Claude Opus.</li>
+          <li><strong>Context window.</strong> Gemini Flash supports up to 1M tokens, eliminating context window concerns for all practical PDF sizes.</li>
+          <li><strong>Free tier.</strong> Google Generative AI has a generous free tier that enables zero-cost development and demo deployment.</li>
+        </ul>
+        <p><strong>Tradeoffs:</strong> GPT-4 has a larger ecosystem. Claude 3.5 Sonnet may outperform Flash on complex reasoning tasks. Gemini's function calling and structured output support is slightly less mature than OpenAI's.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q18</span>What would you change if you needed to support 100-page documents?</div>
+      <div class="qa-answer">
+        <p><strong>Remove the 5-page limit</strong>, but also address the downstream consequences:</p>
+        <p><strong>Ingestion time:</strong> 100 pages = ~50,000–100,000 tokens of text, producing hundreds of chunks. Embedding all of them takes 10–30 seconds. This will timeout a synchronous HTTP request. Fix: async ingestion with job queues. Return a job ID; poll for completion.</p>
+        <p><strong>Chunking strategy:</strong> Default LlamaIndex chunking (1024 tokens) produces ~100 chunks for 100 pages. Fix: hierarchical chunking — create summary nodes at the chapter/section level alongside fine-grained paragraph nodes. Route queries to the appropriate granularity.</p>
+        <p><strong>Context window for large results:</strong> If a user asks a question about a topic that spans 20 pages, the top-k retrieval may pull too many chunks, exceeding the LLM's context window. Fix: add a summarization step for broad queries, and use reranking to select the most informative chunks.</p>
+        <p><strong>Memory:</strong> Increase <code>ChatMemoryBuffer</code> size or use a "document-aware" memory that re-retrieves relevant earlier context on demand.</p>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q19</span>Your backend is on Render with cold starts. How would you fix this for production?</div>
+      <div class="qa-answer">
+        <p><strong>Root cause:</strong> Render's free tier spins down the container after 15 minutes of inactivity. On the next request, the container must cold-start (download image, start Python, load models, initialize Pinecone connection), which takes 30–60 seconds.</p>
+        <p><strong>Immediate fixes (cheap):</strong></p>
+        <ul>
+          <li><strong>Render paid tier ($7/month):</strong> Keeps the container always warm. Eliminates cold starts completely.</li>
+          <li><strong>External ping service:</strong> Use UptimeRobot or a GitHub Actions cron job to ping the backend's <code>/health</code> endpoint every 10 minutes. Free but fragile.</li>
+        </ul>
+        <p><strong>Production-grade fixes:</strong></p>
+        <ul>
+          <li><strong>Google Cloud Run with <code>min-instances=1</code>:</strong> Always keeps one instance warm. Pay only for active requests beyond the minimum instance.</li>
+          <li><strong>Pre-warming:</strong> On the frontend, send a lightweight <code>/health</code> ping to the backend when the user first opens the page. By the time they click "Upload," the backend is ready.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="qa-block">
+      <div class="qa-question"><span class="q-badge">Q20</span>Explain how namespace-based multi-tenancy works in Pinecone and why you chose it.</div>
+      <div class="qa-answer">
+        <p>A Pinecone <strong>index</strong> is a single collection of vectors, all with the same dimensionality and metric (cosine in this project). A <strong>namespace</strong> is a logical partition within an index. Vectors in different namespaces never interact:</p>
+        <ul>
+          <li>Upsert to namespace "session-A" → only queryable in namespace "session-A"</li>
+          <li>Query namespace "session-A" → only returns vectors from namespace "session-A"</li>
+          <li>Namespace "session-B" is completely isolated, despite sharing the same underlying index</li>
+        </ul>
+        <pre><code># When indexing (upload)
+vector_store = PineconeVectorStore(pinecone_index=pinecone_index, namespace=session_id)
+# LlamaIndex automatically scopes the query to the same namespace</code></pre>
+        <div class="table-wrap">
+        <table>
+          <thead><tr><th>Approach</th><th>Pros</th><th>Cons</th></tr></thead>
+          <tbody>
+            <tr><td>Namespace per user (current)</td><td>Single index to manage, no index creation per user, low overhead</td><td>All users share index capacity</td></tr>
+            <tr><td>Index per user</td><td>Complete isolation, independent scaling</td><td>Pinecone charges per index, slow to create, operational complexity</td></tr>
+            <tr><td>Metadata filtering</td><td>No namespace overhead</td><td>Slower (scans all vectors, then filters), potential data leakage bugs</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p>Namespaces are the Pinecone-recommended approach for multi-tenant applications. The session_id UUID ensures namespace names are unpredictable, adding an additional layer of access control.</p>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- ══════════════════════════════════════
+         SECTION 8 — INTERVIEW ANSWER
+    ══════════════════════════════════════ -->
+    <span id="sec8" class="section-anchor"></span>
+    <div class="interview-cover">
+      <h2>Interview Answer</h2>
+      <p>Describe your experience building AI-powered product features or applications.</p>
+    </div>
+
+    <br>
+    <p>I built a full-stack RAG application that lets users upload a PDF and ask natural language questions about it, with answers streamed back in real time. The motivation was deliberate: I had studied RAG architectures conceptually but hadn't built one end-to-end in production. I wanted to close that gap — not with a notebook demo, but with a real deployed system that handles multi-user isolation, streaming, and conversation memory.</p>
+
+    <h3>The Stack I Chose and Why</h3>
+    <ul>
+      <li><strong>LlamaIndex</strong> as the RAG orchestration layer — it abstracts ingestion, chunking, embedding, and the retrieval-generation loop, letting me move fast while understanding each layer</li>
+      <li><strong>Google Gemini 2.5 Flash</strong> for generation and <strong>gemini-embedding-001</strong> for 768-dimensional vector embeddings — single provider, generous free tier, strong instruction-following</li>
+      <li><strong>Pinecone</strong> (serverless) as the vector store, with namespace-based isolation so each user's session is scoped to their own partition of the index</li>
+      <li><strong>FastAPI + Uvicorn</strong> for the async Python backend and <strong>Next.js + TypeScript</strong> for the frontend</li>
+      <li>Deployed across <strong>Vercel</strong> (frontend) and <strong>Render</strong> (backend)</li>
+    </ul>
+
+    <h3>My Role</h3>
+    <p>Complete end-to-end ownership — architecture design, full RAG pipeline implementation, streaming chat UI, and cross-platform deployment.</p>
+
+    <h3>The Hardest Problems I Solved</h3>
+
+    <div class="info-box purple">
+      <div class="info-box-title">Sync/Async Bridge</div>
+      <p>LlamaIndex's <code>ChatEngine</code> is synchronous. Calling it directly inside an <code>async</code> FastAPI handler blocks the entire event loop, making the server unresponsive to concurrent requests. I offloaded it to a thread pool via <code>loop.run_in_executor()</code>, keeping the server non-blocking while the LLM generates.</p>
+    </div>
+
+    <div class="info-box blue">
+      <div class="info-box-title">Multi-User Data Isolation</div>
+      <p>Each PDF upload generates a UUID that doubles as both the session ID and the Pinecone namespace. This scopes vector retrieval at the database level — not just in application logic — so user A's document embeddings are never reachable from user B's queries.</p>
+    </div>
+
+    <div class="info-box green">
+      <div class="info-box-title">Token Streaming</div>
+      <p>LlamaIndex's <code>stream_chat()</code> returns a synchronous generator. I wrapped it in a FastAPI <code>StreamingResponse</code> using an async generator that yields SSE-formatted tokens. The frontend consumes this with the native Fetch API, rendering each token as it arrives.</p>
+    </div>
+
+    <h3>Production Status</h3>
+    <p>The app is publicly deployed and functional. Response quality is consistently accurate for the use cases I tested — correct fact extraction, source page attribution, and multi-turn conversation context. The main known limitation is cold-start latency on Render's free tier (~30–45 seconds after inactivity), which I'd address with a paid always-on container or keep-warm pinging in a production context.</p>
+
+    <h3>What I'd Change at Scale</h3>
+    <ul>
+      <li>Add a cross-encoder reranker between retrieval and generation</li>
+      <li>Move session state from in-process memory to Redis</li>
+      <li>Shift PDF ingestion to a background job queue to avoid HTTP timeouts on large documents</li>
+      <li>Implement a RAGAS evaluation pipeline to catch retrieval regressions across deployments</li>
+    </ul>
+
+    <hr>
+    <p style="text-align:center;color:#9ca3af;font-size:0.8rem;margin-top:2rem;">
+      Technical Report &mdash; PDF Q&amp;A RAG Application &mdash; Stack: Next.js + FastAPI + LlamaIndex + Gemini 2.5 Flash + Pinecone &rarr; Vercel + Render
+    </p>
+
+  </div><!-- /content -->
+</main>
+</div><!-- /page-wrap -->
+</body>
+</html>
