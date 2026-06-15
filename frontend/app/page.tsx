@@ -2,6 +2,13 @@
 
 import { useState, useRef, useEffect } from "react";
 
+// 1. Define the base URL at the top of your file (outside the component)
+// For local testing, keep localhost. 
+// For production, we will change this via Environment Variables later.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+
+
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
@@ -151,9 +158,10 @@ export default function Home() {
     // formData.append("api_key", apiKey);
 
     try {
-      console.log("Attempting upload to http://localhost:8000/upload...");
+      console.log(`Attempting upload to ${API_BASE_URL}/upload...`);
       
-      const response = await fetch("http://localhost:8000/upload", {
+      // const response = await fetch("http://localhost:8000/upload", {
+      const response = await fetch(`${API_BASE_URL}/upload`, {
         method: "POST",
         body: formData,
         // Explicitly ensure no extra headers interfere
@@ -181,7 +189,7 @@ export default function Home() {
       let msg = "Failed to connect to backend.";
       
       if (error.message.includes("Failed to fetch")) {
-        msg = "Could not connect to http://localhost:8000. Is the server running? Check CORS.";
+        msg = `Could not connect to ${API_BASE_URL}. Is the server running? Check CORS.`;
       } else {
         msg = error.message;
       }
@@ -213,7 +221,8 @@ export default function Home() {
       formData.append("query", userMessage);
 
       // 3. Call the Streaming Endpoint
-      const response = await fetch("http://localhost:8000/chat/stream", {
+      // const response = await fetch("http://localhost:8000/chat/stream", {
+      const response = await fetch(`${API_BASE_URL}/chat/stream`, {
         method: "POST",
         body: formData,
       });
