@@ -5,7 +5,8 @@ import { useState, useRef, useEffect } from "react";
 // 1. Define the base URL at the top of your file (outside the component)
 // For local testing, keep localhost. 
 // For production, we will change this via Environment Variables later.
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = "http://localhost:8000";
 
 
 
