@@ -269,45 +269,45 @@ async def chat(session_id: str = Form(...), query: str = Form(...)):
         #     "session_id": session_id # Echo back the ID for confirmation
         # }
         sources = []
-        # Check if sources exist and are iterable
-        if hasattr(response, 'sources') and response.sources:
-            for source in response.sources:
-                try:
-                    # Case 1: It's a standard NodeWithScore (has .node)
-                    if hasattr(source, 'node'):
-                        node = source.node
-                    # Case 2: It might be a ToolOutput containing a node (newer versions)
-                    elif hasattr(source, 'content') and hasattr(source.content, 'node'):
-                        node = source.content.node
-                    else:
-                        # Skip unknown source types
-                        continue
-                    
-                    # Extract metadata safely
-                    sources.append({
-                        "text": node.text[:200] + "...",
-                        "page": node.metadata.get("page_label", "N/A"),
-                        "file": node.metadata.get("file_name", "Unknown")
-                    })
-                except Exception as src_err:
-                    # Log the specific source error but continue processing others
-                    print(f"Warning: Could not parse source: {src_err}")
-                    continue
-
-        # # ✅ Use source_nodes instead of sources
-        # if hasattr(response, 'source_nodes') and response.source_nodes:
-        #     for node_with_score in response.source_nodes:
+        # # Check if sources exist and are iterable
+        # if hasattr(response, 'sources') and response.sources:
+        #     for source in response.sources:
         #         try:
-        #             node = node_with_score.node  # Extract the actual node
+        #             # Case 1: It's a standard NodeWithScore (has .node)
+        #             if hasattr(source, 'node'):
+        #                 node = source.node
+        #             # Case 2: It might be a ToolOutput containing a node (newer versions)
+        #             elif hasattr(source, 'content') and hasattr(source.content, 'node'):
+        #                 node = source.content.node
+        #             else:
+        #                 # Skip unknown source types
+        #                 continue
+                    
+        #             # Extract metadata safely
         #             sources.append({
         #                 "text": node.text[:200] + "...",
         #                 "page": node.metadata.get("page_label", "N/A"),
-        #                 "file": node.metadata.get("file_name", "Unknown"),
-        #                 "score": round(node_with_score.score, 4) if node_with_score.score else "N/A"
+        #                 "file": node.metadata.get("file_name", "Unknown")
         #             })
         #         except Exception as src_err:
+        #             # Log the specific source error but continue processing others
         #             print(f"Warning: Could not parse source: {src_err}")
         #             continue
+
+        # ✅ Use source_nodes instead of sources
+        if hasattr(response, 'source_nodes') and response.source_nodes:
+            for node_with_score in response.source_nodes:
+                try:
+                    node = node_with_score.node  # Extract the actual node
+                    sources.append({
+                        "text": node.text[:200] + "...",
+                        "page": node.metadata.get("page_label", "N/A"),
+                        "file": node.metadata.get("file_name", "Unknown"),
+                        "score": round(node_with_score.score, 4) if node_with_score.score else "N/A"
+                    })
+                except Exception as src_err:
+                    print(f"Warning: Could not parse source: {src_err}")
+                    continue
 
 
         # if hasattr(response, 'sources') and response.sources:
@@ -367,20 +367,21 @@ async def chat_stream(session_id: str = Form(...), query: str = Form(...)):
             
             # # After the text is done, send the sources as a final event
             sources = []
-            # if response.sources:
-            #     for source in response.sources:
-            #         sources.append({
-            #             "page": source.node.metadata.get("page_label", "N/A"),
-            #             "snippet": source.node.text[:150]
-            #         })
+            if response.sources:
+                for source in response.sources:
+                    sources.append({
+                        "page": source.node.metadata.get("page_label", "N/A"),
+                        "snippet": source.node.text[:150]
+                    })
 
-            for node_with_score in response.source_nodes:
-                node = node_with_score.node
-                sources.append({
-                    "page": node.metadata.get("page_label", "N/A"),
-                    "snippet": node.text[:150],
-                    "score": round(node_with_score.score, 4) if node_with_score.score else "N/A"
-                })
+            # for node_with_score in response.source_nodes:
+            #     node = node_with_score.node
+            #     sources.append({
+            #         "page": node.metadata.get("page_label", "N/A"),
+            #         "snippet": node.text[:150],
+            #         "score": round(node_with_score.score, 4) if node_with_score.score else "N/A"
+            #     })
+            
             # sources = []
             # if hasattr(response, 'sources') and response.sources:
             #     for source in response.sources:
