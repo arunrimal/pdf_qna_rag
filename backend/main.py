@@ -9,7 +9,6 @@ from settings import settings
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from llama_index.core.query_engine import CitationQueryEngine
 import json
 
 # LlamaIndex Imports
@@ -45,16 +44,19 @@ if not GEMINI_API_KEY or not PINECONE_API_KEY:
 
 # Initialize Pinecone Client (Global)
 pc = Pinecone(api_key=PINECONE_API_KEY)
-# Step 1 — delete old index
-pc.delete_index(INDEX_NAME)
 
-# Step 2 — recreate with correct dimension
-pc.create_index(
-    name=INDEX_NAME,
-    dimension=3072,  # ← matches gemini-embedding-001
-    metric="cosine",
-    spec=ServerlessSpec(cloud="aws", region=PINECONE_ENVIRONMENT)
-)
+# Create index only if it doesn't exist (avoids wiping data on every redeploy)
+existing_indexes = [i.name for i in pc.list_indexes()]
+if INDEX_NAME not in existing_indexes:
+    pc.create_index(
+        name=INDEX_NAME,
+        dimension=3072,
+        metric="cosine",
+        spec=ServerlessSpec(cloud="aws", region=PINECONE_ENVIRONMENT)
+    )
+    # Wait for index to be ready before accepting requests
+    while not pc.describe_index(INDEX_NAME).status['ready']:
+        time.sleep(1)
 
 # Global Dictionary to store active sessions (Engine + Metadata)
 # Structure: { "session_id": { "chat_engine": obj, "filename": str } }
@@ -96,15 +98,6 @@ def initialize_engine(pdf_path: str, session_id: str):
     LlamaSettings.llm = llm
     LlamaSettings.embed_model = embed_model
 
-    # 2. Ensure Pinecone Index Exists
-    if INDEX_NAME not in pc.list_indexes().names():
-        pc.create_index(
-            name=INDEX_NAME,
-            dimension=768,
-            metric="cosine",
-            spec=ServerlessSpec(cloud="aws", region=PINECONE_ENVIRONMENT)
-        )
-    
     pinecone_index = pc.Index(INDEX_NAME)
 
     # 3. Create Vector Store with NAMESPACE = session_id
@@ -248,52 +241,9 @@ async def chat(session_id: str = Form(...), query: str = Form(...)):
         # WRAP THE SYNC CALL IN run_in_executor
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(None, lambda: engine.chat(query))
-
-
         
         # 4. FORMATTING: Extract sources for the frontend to display
-        # sources = []
-        # if response.sources:
-        #     for source in response.sources:
-        #         # Safely get metadata, defaulting to 'N/A' if missing
-        #         sources.append({
-        #             "text": source.node.text[:200] + "...", # Snippet preview
-        #             "page": source.node.metadata.get("page_label", "N/A"),
-        #             "file": source.node.metadata.get("file_name", "Unknown")
-        #         })
-
-        # # 5. RETURN: Send structured JSON back to the frontend
-        # return {
-        #     "answer": response.response,
-        #     "sources": sources,
-        #     "session_id": session_id # Echo back the ID for confirmation
-        # }
         sources = []
-        # # Check if sources exist and are iterable
-        # if hasattr(response, 'sources') and response.sources:
-        #     for source in response.sources:
-        #         try:
-        #             # Case 1: It's a standard NodeWithScore (has .node)
-        #             if hasattr(source, 'node'):
-        #                 node = source.node
-        #             # Case 2: It might be a ToolOutput containing a node (newer versions)
-        #             elif hasattr(source, 'content') and hasattr(source.content, 'node'):
-        #                 node = source.content.node
-        #             else:
-        #                 # Skip unknown source types
-        #                 continue
-                    
-        #             # Extract metadata safely
-        #             sources.append({
-        #                 "text": node.text[:200] + "...",
-        #                 "page": node.metadata.get("page_label", "N/A"),
-        #                 "file": node.metadata.get("file_name", "Unknown")
-        #             })
-        #         except Exception as src_err:
-        #             # Log the specific source error but continue processing others
-        #             print(f"Warning: Could not parse source: {src_err}")
-        #             continue
-
         # ✅ Use source_nodes instead of sources
         if hasattr(response, 'source_nodes') and response.source_nodes:
             for node_with_score in response.source_nodes:
@@ -309,25 +259,7 @@ async def chat(session_id: str = Form(...), query: str = Form(...)):
                     print(f"Warning: Could not parse source: {src_err}")
                     continue
 
-
-        # if hasattr(response, 'sources') and response.sources:
-        #     for source in response.sources:
-        #         try:
-        #             raw = getattr(source, 'raw_output', None)
-        #             if isinstance(raw, list):
-        #                 for node_with_score in raw:
-        #                     if hasattr(node_with_score, 'node'):
-        #                         node = node_with_score.node
-        #                         sources.append({
-        #                             "text": node.text[:200] + "...",
-        #                             "page": node.metadata.get("page_label", "N/A"),
-        #                             "file": node.metadata.get("file_name", "Unknown"),
-        #                             "score": round(node_with_score.score, 4) if node_with_score.score else "N/A"
-        #                         })
-        #         except Exception as src_err:
-        #             print(f"Warning: Could not parse source: {src_err}")
-        #             continue
-
+        # # 5. RETURN: Send structured JSON back to the frontend
         return {
             "answer": response.response,
             "sources": sources,
@@ -367,39 +299,14 @@ async def chat_stream(session_id: str = Form(...), query: str = Form(...)):
             
             # # After the text is done, send the sources as a final event
             sources = []
-            if response.sources:
-                for source in response.sources:
-                    sources.append({
-                        "page": source.node.metadata.get("page_label", "N/A"),
-                        "snippet": source.node.text[:150]
-                    })
 
-            # for node_with_score in response.source_nodes:
-            #     node = node_with_score.node
-            #     sources.append({
-            #         "page": node.metadata.get("page_label", "N/A"),
-            #         "snippet": node.text[:150],
-            #         "score": round(node_with_score.score, 4) if node_with_score.score else "N/A"
-            #     })
-            
-            # sources = []
-            # if hasattr(response, 'sources') and response.sources:
-            #     for source in response.sources:
-            #         try:
-            #             if hasattr(source, 'node'):
-            #                 node = source.node
-            #             elif hasattr(source, 'content') and hasattr(source.content, 'node'):
-            #                 node = source.content.node
-            #             else:
-            #                 continue  # Skip unknown ToolOutput shapes
-                        
-            #             sources.append({
-            #                 "page": node.metadata.get("page_label", "N/A"),
-            #                 "snippet": node.text[:150]
-            #             })
-            #         except Exception as src_err:
-            #             print(f"Warning: Could not parse source: {src_err}")
-            #             continue  # Never let source parsing kill the response
+            for node_with_score in response.source_nodes:
+                node = node_with_score.node
+                sources.append({
+                    "page": node.metadata.get("page_label", "N/A"),
+                    "snippet": node.text[:150],
+                    "score": round(node_with_score.score, 4) if node_with_score.score else "N/A"
+                })
 
             
             final_data = json.dumps({"sources": sources, "done": True})
@@ -428,20 +335,16 @@ async def clear_session(session_id: str = Form(...)):
         )
     
     try:
-        # 2. RETRIEVAL: Get the collection name before we delete the session info
-        collection_name = active_sessions[session_id]["collection_name"]
-        
-        # Optional: Delete data from Pinecone namespace here if you want permanent cleanup
+        # Delete vectors from Pinecone namespace for this session
         index = pc.Index(INDEX_NAME)
         index.delete(delete_all=True, namespace=session_id)
-        
-        # 4. CLEANUP MEMORY (RAM)
-        # Remove the engine and data from our dictionary
+
+        # Free memory
         del active_sessions[session_id]
-        
+
         return {
             "message": "Session cleared successfully.",
-            "details": f"Deleted collection '{collection_name}' and freed memory."
+            "details": f"Deleted namespace '{session_id}' and freed memory."
         }
     
     except Exception as e:
