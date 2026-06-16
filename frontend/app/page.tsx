@@ -79,9 +79,21 @@ export default function Home() {
         <div className="max-w-4xl mx-auto flex justify-between items-center">
           <h1 className="text-xl font-bold text-blue-400">📄 PDF Q&A RAG</h1>
           {sessionId && (
-            <span className="text-xs bg-green-900 text-green-300 px-2 py-1 rounded-full border border-green-700">
-              ● Session Active
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs bg-green-900 text-green-300 px-2 py-1 rounded-full border border-green-700">
+                ● Session Active
+              </span>
+              <button
+                onClick={() => {
+                  localStorage.removeItem("session_id");
+                  setSessionId(null);
+                  setMessages([]);
+                }}
+                className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded-full border border-gray-600 transition"
+              >
+                + New Chat
+              </button>
+            </div>
           )}
         </div>
       </header>
