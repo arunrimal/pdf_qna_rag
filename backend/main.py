@@ -4,12 +4,14 @@ import uuid
 import tempfile
 import shutil
 import time
+from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 from settings import settings
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
+import aiosqlite
 
 # LlamaIndex Imports
 from llama_index.core import (
@@ -19,6 +21,7 @@ from llama_index.core import (
     StorageContext
 )
 from llama_index.core.memory import ChatMemoryBuffer
+from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
 from llama_index.vector_stores.pinecone import PineconeVectorStore
@@ -38,6 +41,7 @@ GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT", "us-east-1")
 INDEX_NAME = "pdf-rag"
+DB_PATH = "sessions.db"
 
 if not GEMINI_API_KEY or not PINECONE_API_KEY:
     raise ValueError("Missing API Keys in .env file!")
@@ -62,8 +66,37 @@ if INDEX_NAME not in existing_indexes:
 # Structure: { "session_id": { "chat_engine": obj, "filename": str } }
 active_sessions: Dict[str, Dict[str, Any]] = {}
 
+
+async def init_db():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                filename TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                role TEXT,
+                content TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+        """)
+        await db.commit()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+
+
 # Initialize FastAPI
-app = FastAPI(title=settings.app_config.app_name)
+app = FastAPI(title=settings.app_config.app_name, lifespan=lifespan)
 
 # Enable CORS (Allows React frontend on localhost:3000 to talk to this backend)
 app.add_middleware(
@@ -73,9 +106,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-
 
 # def initialize_engine(api_key: str, pdf_path: str):
 def initialize_engine(pdf_path: str, session_id: str):
@@ -150,9 +180,67 @@ def initialize_engine(pdf_path: str, session_id: str):
     #     citation_chunk_size=512,
     # )
     
-    # RETURN the engine instead of saving to a global variable
     return chat_engine
-    # return query_engine
+
+
+def rebuild_engine(session_id: str):
+    """Rebuild chat engine from existing Pinecone namespace — no PDF needed."""
+    llm = GoogleGenAI(model="models/gemini-2.5-flash", api_key=GEMINI_API_KEY)
+    embed_model = GoogleGenAIEmbedding(
+        model_name="models/gemini-embedding-001",
+        api_key=GEMINI_API_KEY,
+        output_dimensionality=3072
+    )
+    LlamaSettings.llm = llm
+    LlamaSettings.embed_model = embed_model
+
+    pinecone_index = pc.Index(INDEX_NAME)
+    vector_store = PineconeVectorStore(pinecone_index=pinecone_index, namespace=session_id)
+
+    index = VectorStoreIndex.from_vector_store(vector_store)
+    memory = ChatMemoryBuffer.from_defaults(token_limit=3900)
+
+    chat_engine = index.as_chat_engine(
+        chat_mode="context",
+        memory=memory,
+        system_prompt=(
+            "You are a helpful assistant. Use the provided PDF context as the source of truth for facts (names, dates, skills). "
+            "If the user asks for a summary or answer, stick strictly to the context. "
+            "If the user asks you to generate something new (like a cover letter, email, or bio), use the facts from the context to inform your generation, but feel free to use your own knowledge for structure, tone, and formatting."
+        ),
+    )
+    return chat_engine
+
+
+async def get_or_rebuild_session(session_id: str) -> Dict[str, Any]:
+    """Return session from RAM. If missing, rebuild from SQLite + Pinecone."""
+    if session_id in active_sessions:
+        return active_sessions[session_id]
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT filename FROM sessions WHERE session_id = ?", (session_id,))
+        row = await cursor.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found. Please upload a PDF first.")
+
+    loop = asyncio.get_event_loop()
+    chat_engine = await loop.run_in_executor(None, lambda: rebuild_engine(session_id))
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+            (session_id,)
+        )
+        saved_messages = await cursor.fetchall()
+
+    for role, content in saved_messages:
+        msg_role = MessageRole.USER if role == "user" else MessageRole.ASSISTANT
+        chat_engine.memory.put(ChatMessage(role=msg_role, content=content))
+
+    session_data = {"chat_engine": chat_engine, "filename": row[0]}
+    active_sessions[session_id] = session_data
+    return session_data
 
 
 @app.post("/upload")
@@ -195,16 +283,20 @@ async def upload_pdf(file: UploadFile = File(...)):
         # Call without API key
         chat_engine = initialize_engine(temp_file_path, session_id)
         
-        # 4. STORE in global dictionary
+        # 4. STORE in RAM and SQLite
         active_sessions[session_id] = {
             "chat_engine": chat_engine,
             "filename": file.filename
         }
-        
-        # 5. Return the Session ID to the user
-        # The frontend MUST save this ID and send it with every chat request
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO sessions (session_id, filename) VALUES (?, ?)",
+                (session_id, file.filename)
+            )
+            await db.commit()
+
         return {
-            "message": "PDF processed successfully!", 
+            "message": "PDF processed successfully!",
             "session_id": session_id,
             "filename": file.filename,
             "pages": page_count
@@ -279,33 +371,33 @@ async def chat(session_id: str = Form(...), query: str = Form(...)):
 
 @app.post("/chat/stream")
 async def chat_stream(session_id: str = Form(...), query: str = Form(...)):
-    # 1. VALIDATION (Same as above)
-    if session_id not in active_sessions:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    
-    session_data = active_sessions[session_id]
+    session_data = await get_or_rebuild_session(session_id)
     chat_engine = session_data["chat_engine"]
 
-    # 3. GENERATOR FUNCTION: This runs asynchronously
     async def event_generator():
         try:
-            # Use stream_chat instead of chat
-            # response = await engine.stream_chat(query)
-            
-            # WRAP THE SYNC CALL IN run_in_executor
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, lambda: chat_engine.stream_chat(query))
-            
-            # Iterate over tokens as they are generated
+
+            full_response = ""
             for token in response.response_gen:
-                # Format as Server-Sent Event (SSE)
-                # The 'data: ' prefix is required by the SSE protocol
+                full_response += token
                 data = json.dumps({"token": token})
                 yield f"data: {data}\n\n"
-            
-            # # After the text is done, send the sources as a final event
-            sources = []
 
+            # Save user + assistant messages to SQLite
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute(
+                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                    (session_id, "user", query)
+                )
+                await db.execute(
+                    "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                    (session_id, "assistant", full_response)
+                )
+                await db.commit()
+
+            sources = []
             for node_with_score in response.source_nodes:
                 node = node_with_score.node
                 sources.append({
@@ -314,18 +406,34 @@ async def chat_stream(session_id: str = Form(...), query: str = Form(...)):
                     "score": round(node_with_score.score, 4) if node_with_score.score else "N/A"
                 })
 
-            
             final_data = json.dumps({"sources": sources, "done": True})
             yield f"data: {final_data}\n\n"
-            
+
         except Exception as e:
-            # Send error as an SSE event so the frontend can show it
             error_data = json.dumps({"error": str(e)})
             yield f"data: {error_data}\n\n"
 
     # 4. RETURN STREAMING RESPONSE
     # media_type='text/event-stream' tells the browser "This is a live stream"
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.get("/history/{session_id}")
+async def get_history(session_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT filename FROM sessions WHERE session_id = ?", (session_id,))
+        session = await cursor.fetchone()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found.")
+
+        cursor = await db.execute(
+            "SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+            (session_id,)
+        )
+        rows = await cursor.fetchall()
+
+    messages = [{"role": row[0], "content": row[1]} for row in rows]
+    return {"filename": session[0], "messages": messages}
+
 
 @app.get("/sessions")
 async def list_sessions():
