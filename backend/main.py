@@ -439,6 +439,17 @@ async def get_history(session_id: str):
 async def list_sessions():
     return {"active_sessions": list(active_sessions.keys())}
 
+
+@app.get("/sessions/all")
+async def list_all_sessions():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT session_id, filename, created_at FROM sessions ORDER BY created_at DESC"
+        )
+        rows = await cursor.fetchall()
+    return [{"session_id": r[0], "filename": r[1], "created_at": r[2]} for r in rows]
+
+
 @app.post("/clear")
 async def clear_session(session_id: str = Form(...)):
     # 1. VALIDATION: Check if the session exists
