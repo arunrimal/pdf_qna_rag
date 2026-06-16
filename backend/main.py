@@ -435,6 +435,21 @@ async def get_history(session_id: str):
     return {"filename": session[0], "messages": messages}
 
 
+@app.get("/sessions/all")
+async def list_all_sessions():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT session_id, filename, created_at FROM sessions ORDER BY created_at DESC"
+        )
+        rows = await cursor.fetchall()
+    return {
+        "sessions": [
+            {"session_id": row[0], "filename": row[1], "created_at": row[2]}
+            for row in rows
+        ]
+    }
+
+
 @app.get("/sessions")
 async def list_sessions():
     return {"active_sessions": list(active_sessions.keys())}
