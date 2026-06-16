@@ -107,7 +107,13 @@ def initialize_engine(pdf_path: str, session_id: str):
 
     # 4. Load Documents
     documents = SimpleDirectoryReader(input_files=[pdf_path]).load_data()
-    
+
+    # # DEBUG: inspect extracted text
+    # for i, doc in enumerate(documents):
+    #     print(f"\n--- Document {i} ---")
+    #     print(f"Metadata: {doc.metadata}")
+    #     print(f"Text preview: {doc.text[:500]}")
+
     if not documents:
         raise ValueError("No text could be extracted from the PDF.")
 
