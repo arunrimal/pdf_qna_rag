@@ -189,7 +189,7 @@ export default function Home() {
   const fetchSessions = () => {
     fetch(`${API_BASE_URL}/sessions/all`)
       .then((res) => res.json())
-      .then((data) => setSessions(data.sessions ?? []))
+      .then((data) => setSessions(Array.isArray(data) ? data : []))
       .catch(() => {});
   };
 
