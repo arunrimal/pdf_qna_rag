@@ -29,6 +29,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const toggleSources = (idx: number) => {
     setExpandedSources((prev) => {
@@ -75,25 +76,37 @@ export default function Home() {
     <main className="flex h-screen bg-gray-900 text-white overflow-hidden">
 
       {/* SIDEBAR */}
-      <aside className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col shrink-0">
-        {/* New Chat Button */}
-        <div className="p-4">
+      <aside className={`${sidebarOpen ? "w-64" : "w-10"} bg-gray-800 border-r border-gray-700 flex flex-col shrink-0 transition-all duration-300 overflow-hidden`}>
+
+        {/* Toggle + New Chat row */}
+        <div className="flex items-center gap-2 p-2 border-b border-gray-700">
           <button
-            onClick={() => {
-              localStorage.removeItem("session_id");
-              setSessionId(null);
-              setMessages([]);
-            }}
-            className="w-full flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white text-sm px-4 py-2.5 rounded-xl border border-gray-600 transition"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition shrink-0"
+            title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
           >
-            + New Chat
+            {sidebarOpen ? "‹" : "›"}
           </button>
+          {sidebarOpen && (
+            <button
+              onClick={() => {
+                localStorage.removeItem("session_id");
+                setSessionId(null);
+                setMessages([]);
+              }}
+              className="flex-1 flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-1.5 rounded-xl border border-gray-600 transition"
+            >
+              + New Chat
+            </button>
+          )}
         </div>
 
         {/* Session History — populated in next step */}
-        <div className="flex-1 overflow-y-auto px-3">
-          <p className="text-xs text-gray-500 px-2 pb-2">Recent Sessions</p>
-        </div>
+        {sidebarOpen && (
+          <div className="flex-1 overflow-y-auto px-3 pt-3">
+            <p className="text-xs text-gray-500 px-2 pb-2">Recent Sessions</p>
+          </div>
+        )}
       </aside>
 
       {/* MAIN AREA */}
