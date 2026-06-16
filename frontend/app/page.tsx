@@ -5,7 +5,8 @@ import { useState, useRef, useEffect } from "react";
 // 1. Define the base URL at the top of your file (outside the component)
 // For local testing, keep localhost. 
 // For production, we will change this via Environment Variables later.
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 // const API_BASE_URL = "http://localhost:8000";
 
 
@@ -48,6 +49,27 @@ export default function Home() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Restore session and messages from backend on page load
+  useEffect(() => {
+    const savedSessionId = localStorage.getItem("session_id");
+    if (!savedSessionId) return;
+
+    fetch(`${API_BASE_URL}/history/${savedSessionId}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Session expired");
+        return res.json();
+      })
+      .then((data) => {
+        setSessionId(savedSessionId);
+        if (data.messages && data.messages.length > 0) {
+          setMessages(data.messages);
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem("session_id");
+      });
+  }, []);
 
   return (
     <main className="flex min-h-screen flex-col bg-gray-900 text-white">
@@ -196,6 +218,7 @@ export default function Home() {
     // TODO: Call API to upload
 
     setLoading(true); // Show loading state
+    localStorage.removeItem("session_id"); // clear any previous session
     const formData = new FormData();
     formData.append("file", file);
 
@@ -230,10 +253,11 @@ export default function Home() {
       const data = await response.json();
       console.log("Upload success:", data);
       
+      localStorage.setItem("session_id", data.session_id);
       setSessionId(data.session_id);
-      setMessages((prev) => [...prev, { 
-        role: "assistant", 
-        content: `Successfully loaded "${data.filename}". Ask me anything!` 
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: `Successfully loaded "${data.filename}". Ask me anything!`
       }]);
 
     } catch (error: any) {
