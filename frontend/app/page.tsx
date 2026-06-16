@@ -29,6 +29,33 @@ type Session = {
   created_at: string;
 };
 
+function SessionItem({ s, sessionId, isFavorite, onSelect, onToggleFavorite }: {
+  s: Session;
+  sessionId: string | null;
+  isFavorite: boolean;
+  onSelect: () => void;
+  onToggleFavorite: () => void;
+}) {
+  return (
+    <div className={`flex items-center gap-1 rounded-lg mb-1 pr-1 ${sessionId === s.session_id ? "bg-blue-700" : "hover:bg-gray-700"}`}>
+      <button
+        onClick={onSelect}
+        className="flex-1 text-left px-3 py-2 text-sm truncate text-gray-300"
+        title={s.filename}
+      >
+        📄 {s.filename}
+      </button>
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+        className={`shrink-0 text-base px-1 transition ${isFavorite ? "text-yellow-400" : "text-gray-600 hover:text-yellow-400"}`}
+        title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+      >
+        {isFavorite ? "★" : "☆"}
+      </button>
+    </div>
+  );
+}
+
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -37,6 +64,27 @@ export default function Home() {
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+
+  const toggleFavorite = (session_id: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(session_id)) next.delete(session_id);
+      else next.add(session_id);
+      localStorage.setItem("favorites", JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const loadSession = (session_id: string) => {
+    fetch(`${API_BASE_URL}/history/${session_id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        localStorage.setItem("session_id", session_id);
+        setSessionId(session_id);
+        setMessages(data.messages ?? []);
+      });
+  };
 
   const fetchSessions = () => {
     fetch(`${API_BASE_URL}/sessions/all`)
@@ -65,9 +113,11 @@ export default function Home() {
     scrollToBottom();
   }, [messages]);
 
-  // Fetch all sessions for sidebar on page load
+  // Fetch all sessions for sidebar on page load + restore favorites
   useEffect(() => {
     fetchSessions();
+    const saved = localStorage.getItem("favorites");
+    if (saved) setFavorites(new Set(JSON.parse(saved)));
   }, []);
 
   // Restore session and messages from backend on page load
@@ -122,34 +172,44 @@ export default function Home() {
 
         {/* Session History */}
         {sidebarOpen && (
-          <div className="flex-1 overflow-y-auto px-3 pt-3">
-            <p className="text-xs text-gray-500 px-2 pb-2 uppercase tracking-wider">Recent Sessions</p>
-            {sessions.length === 0 ? (
-              <p className="text-xs text-gray-600 px-2 italic">No sessions yet</p>
-            ) : (
-              sessions.map((s) => (
-                <button
-                  key={s.session_id}
-                  onClick={() => {
-                    fetch(`${API_BASE_URL}/history/${s.session_id}`)
-                      .then((res) => res.json())
-                      .then((data) => {
-                        localStorage.setItem("session_id", s.session_id);
-                        setSessionId(s.session_id);
-                        setMessages(data.messages ?? []);
-                      });
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm mb-1 transition truncate ${
-                    sessionId === s.session_id
-                      ? "bg-blue-700 text-white"
-                      : "text-gray-300 hover:bg-gray-700"
-                  }`}
-                  title={s.filename}
-                >
-                  📄 {s.filename}
-                </button>
-              ))
+          <div className="flex-1 overflow-y-auto px-3 pt-3 space-y-4">
+
+            {/* Favourites Section */}
+            {sessions.some((s) => favorites.has(s.session_id)) && (
+              <div>
+                <p className="text-xs text-yellow-500 px-2 pb-2 uppercase tracking-wider">⭐ Favourites</p>
+                {sessions.filter((s) => favorites.has(s.session_id)).map((s) => (
+                  <SessionItem
+                    key={s.session_id}
+                    s={s}
+                    sessionId={sessionId}
+                    isFavorite={true}
+                    onSelect={() => loadSession(s.session_id)}
+                    onToggleFavorite={() => toggleFavorite(s.session_id)}
+                  />
+                ))}
+              </div>
             )}
+
+            {/* Recent Sessions Section */}
+            <div>
+              <p className="text-xs text-gray-500 px-2 pb-2 uppercase tracking-wider">Recent Sessions</p>
+              {sessions.length === 0 ? (
+                <p className="text-xs text-gray-600 px-2 italic">No sessions yet</p>
+              ) : (
+                sessions.filter((s) => !favorites.has(s.session_id)).map((s) => (
+                  <SessionItem
+                    key={s.session_id}
+                    s={s}
+                    sessionId={sessionId}
+                    isFavorite={false}
+                    onSelect={() => loadSession(s.session_id)}
+                    onToggleFavorite={() => toggleFavorite(s.session_id)}
+                  />
+                ))
+              )}
+            </div>
+
           </div>
         )}
       </aside>
