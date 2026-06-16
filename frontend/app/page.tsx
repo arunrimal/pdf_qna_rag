@@ -49,6 +49,14 @@ export default function Home() {
     scrollToBottom();
   }, [messages]);
 
+  // Restore session from localStorage on page load
+  useEffect(() => {
+    const savedSessionId = localStorage.getItem("session_id");
+    if (savedSessionId) {
+      setSessionId(savedSessionId);
+    }
+  }, []);
+
   return (
     <main className="flex min-h-screen flex-col bg-gray-900 text-white">
       
@@ -196,6 +204,7 @@ export default function Home() {
     // TODO: Call API to upload
 
     setLoading(true); // Show loading state
+    localStorage.removeItem("session_id"); // clear any previous session
     const formData = new FormData();
     formData.append("file", file);
 
@@ -230,10 +239,11 @@ export default function Home() {
       const data = await response.json();
       console.log("Upload success:", data);
       
+      localStorage.setItem("session_id", data.session_id);
       setSessionId(data.session_id);
-      setMessages((prev) => [...prev, { 
-        role: "assistant", 
-        content: `Successfully loaded "${data.filename}". Ask me anything!` 
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: `Successfully loaded "${data.filename}". Ask me anything!`
       }]);
 
     } catch (error: any) {
