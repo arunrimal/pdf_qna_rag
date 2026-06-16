@@ -72,28 +72,41 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="flex min-h-screen flex-col bg-gray-900 text-white">
-      
+    <main className="flex h-screen bg-gray-900 text-white overflow-hidden">
+
+      {/* SIDEBAR */}
+      <aside className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col shrink-0">
+        {/* New Chat Button */}
+        <div className="p-4">
+          <button
+            onClick={() => {
+              localStorage.removeItem("session_id");
+              setSessionId(null);
+              setMessages([]);
+            }}
+            className="w-full flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white text-sm px-4 py-2.5 rounded-xl border border-gray-600 transition"
+          >
+            + New Chat
+          </button>
+        </div>
+
+        {/* Session History — populated in next step */}
+        <div className="flex-1 overflow-y-auto px-3">
+          <p className="text-xs text-gray-500 px-2 pb-2">Recent Sessions</p>
+        </div>
+      </aside>
+
+      {/* MAIN AREA */}
+      <div className="flex-1 flex flex-col min-w-0">
+
       {/* 1. Header */}
-      <header className="p-4 border-b border-gray-700 bg-gray-800 shadow-md sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto flex justify-between items-center">
+      <header className="p-4 border-b border-gray-700 bg-gray-800 shadow-md">
+        <div className="flex justify-between items-center">
           <h1 className="text-xl font-bold text-blue-400">📄 PDF Q&A RAG</h1>
           {sessionId && (
-            <div className="flex items-center gap-3">
-              <span className="text-xs bg-green-900 text-green-300 px-2 py-1 rounded-full border border-green-700">
-                ● Session Active
-              </span>
-              <button
-                onClick={() => {
-                  localStorage.removeItem("session_id");
-                  setSessionId(null);
-                  setMessages([]);
-                }}
-                className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded-full border border-gray-600 transition"
-              >
-                + New Chat
-              </button>
-            </div>
+            <span className="text-xs bg-green-900 text-green-300 px-2 py-1 rounded-full border border-green-700">
+              ● Session Active
+            </span>
           )}
         </div>
       </header>
@@ -216,6 +229,7 @@ export default function Home() {
           </p>
         </div>
       </div>
+      </div> {/* end MAIN AREA */}
     </main>
   );
 
