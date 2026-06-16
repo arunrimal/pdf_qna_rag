@@ -29,29 +29,93 @@ type Session = {
   created_at: string;
 };
 
-function SessionItem({ s, sessionId, isFavorite, onSelect, onToggleFavorite }: {
+function SessionItem({ s, sessionId, isFavorite, onSelect, onToggleFavorite, onDelete, onRename, onExport }: {
   s: Session;
   sessionId: string | null;
   isFavorite: boolean;
   onSelect: () => void;
   onToggleFavorite: () => void;
+  onDelete: () => void;
+  onRename: (newName: string) => void;
+  onExport: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(s.filename);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [menuOpen]);
+
+  const submitRename = () => {
+    if (renameValue.trim() && renameValue !== s.filename) {
+      onRename(renameValue.trim());
+    }
+    setRenaming(false);
+  };
+
   return (
-    <div className={`flex items-center gap-1 rounded-lg mb-1 pr-1 ${sessionId === s.session_id ? "bg-blue-700" : "hover:bg-gray-700"}`}>
-      <button
-        onClick={onSelect}
-        className="flex-1 text-left px-3 py-2 text-sm truncate text-gray-300"
-        title={s.filename}
-      >
-        📄 {s.filename}
-      </button>
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
-        className={`shrink-0 text-base px-1 transition ${isFavorite ? "text-yellow-400" : "text-gray-600 hover:text-yellow-400"}`}
-        title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-      >
-        {isFavorite ? "★" : "☆"}
-      </button>
+    <div className={`relative flex items-center gap-1 rounded-lg mb-1 pr-1 group ${sessionId === s.session_id ? "bg-blue-700" : "hover:bg-gray-700"}`}>
+
+      {/* Session name / rename input */}
+      {renaming ? (
+        <input
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onBlur={submitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitRename();
+            if (e.key === "Escape") setRenaming(false);
+          }}
+          autoFocus
+          className="flex-1 bg-gray-600 text-white text-sm px-3 py-2 rounded-lg outline-none"
+        />
+      ) : (
+        <button onClick={onSelect} className="flex-1 text-left px-3 py-2 text-sm truncate text-gray-300" title={s.filename}>
+          📄 {s.filename}
+        </button>
+      )}
+
+      {/* Three-dot menu button */}
+      {!renaming && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+          className="shrink-0 px-1 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition"
+        >
+          ⋮
+        </button>
+      )}
+
+      {/* Dropdown menu */}
+      {menuOpen && (
+        <div ref={menuRef} className="absolute right-0 top-8 z-50 bg-gray-700 border border-gray-600 rounded-xl shadow-lg w-40 py-1 text-sm">
+          <button onClick={() => { setRenaming(true); setMenuOpen(false); }}
+            className="w-full text-left px-4 py-2 hover:bg-gray-600 text-gray-200">
+            ✏️ Rename
+          </button>
+          <button onClick={() => { onToggleFavorite(); setMenuOpen(false); }}
+            className="w-full text-left px-4 py-2 hover:bg-gray-600 text-gray-200">
+            {isFavorite ? "☆ Unstar" : "★ Star"}
+          </button>
+          <button onClick={() => { onExport(); setMenuOpen(false); }}
+            className="w-full text-left px-4 py-2 hover:bg-gray-600 text-gray-200">
+            ⬇️ Export
+          </button>
+          <hr className="border-gray-600 my-1" />
+          <button onClick={() => { onDelete(); setMenuOpen(false); }}
+            className="w-full text-left px-4 py-2 hover:bg-red-700 text-red-400">
+            🗑️ Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -83,6 +147,42 @@ export default function Home() {
         localStorage.setItem("session_id", session_id);
         setSessionId(session_id);
         setMessages(data.messages ?? []);
+      });
+  };
+
+  const handleDelete = (session_id: string) => {
+    fetch(`${API_BASE_URL}/session/${session_id}`, { method: "DELETE" })
+      .then(() => {
+        if (sessionId === session_id) {
+          localStorage.removeItem("session_id");
+          setSessionId(null);
+          setMessages([]);
+        }
+        fetchSessions();
+      });
+  };
+
+  const handleRename = (session_id: string, newName: string) => {
+    const formData = new FormData();
+    formData.append("new_name", newName);
+    fetch(`${API_BASE_URL}/session/${session_id}/rename`, { method: "PATCH", body: formData })
+      .then(() => fetchSessions());
+  };
+
+  const handleExport = (session_id: string, filename: string) => {
+    fetch(`${API_BASE_URL}/history/${session_id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const text = data.messages
+          .map((m: { role: string; content: string }) => `${m.role.toUpperCase()}:\n${m.content}`)
+          .join("\n\n---\n\n");
+        const blob = new Blob([text], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${filename.replace(".pdf", "")}_chat.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
       });
   };
 
@@ -186,6 +286,9 @@ export default function Home() {
                     isFavorite={true}
                     onSelect={() => loadSession(s.session_id)}
                     onToggleFavorite={() => toggleFavorite(s.session_id)}
+                    onDelete={() => handleDelete(s.session_id)}
+                    onRename={(name) => handleRename(s.session_id, name)}
+                    onExport={() => handleExport(s.session_id, s.filename)}
                   />
                 ))}
               </div>
@@ -205,6 +308,9 @@ export default function Home() {
                     isFavorite={false}
                     onSelect={() => loadSession(s.session_id)}
                     onToggleFavorite={() => toggleFavorite(s.session_id)}
+                    onDelete={() => handleDelete(s.session_id)}
+                    onRename={(name) => handleRename(s.session_id, name)}
+                    onExport={() => handleExport(s.session_id, s.filename)}
                   />
                 ))
               )}
