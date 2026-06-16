@@ -471,6 +471,45 @@ async def clear_session(session_id: str = Form(...)):
             detail=f"Failed to clean up resources: {str(e)}"
         )
     
+@app.delete("/session/{session_id}")
+async def delete_session(session_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT session_id FROM sessions WHERE session_id = ?", (session_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Session not found.")
+        await db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        await db.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        await db.commit()
+
+    try:
+        index = pc.Index(INDEX_NAME)
+        index.delete(delete_all=True, namespace=session_id)
+    except Exception:
+        pass
+
+    if session_id in active_sessions:
+        del active_sessions[session_id]
+
+    return {"message": "Session deleted successfully."}
+
+
+@app.patch("/session/{session_id}/rename")
+async def rename_session(session_id: str, new_name: str = Form(...)):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT session_id FROM sessions WHERE session_id = ?", (session_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Session not found.")
+        await db.execute("UPDATE sessions SET filename = ? WHERE session_id = ?", (new_name, session_id))
+        await db.commit()
+
+    if session_id in active_sessions:
+        active_sessions[session_id]["filename"] = new_name
+
+    return {"message": "Session renamed successfully."}
+
+
 if __name__ == "__main__":
     import uvicorn
     print(f"🚀 Starting {settings.app_config.app_name}...")
