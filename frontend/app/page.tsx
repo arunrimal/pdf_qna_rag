@@ -23,6 +23,12 @@ type Message = {
   sources?: Source[];
 };
 
+type Session = {
+  session_id: string;
+  filename: string;
+  created_at: string;
+};
+
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -30,6 +36,14 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sessions, setSessions] = useState<Session[]>([]);
+
+  const fetchSessions = () => {
+    fetch(`${API_BASE_URL}/sessions/all`)
+      .then((res) => res.json())
+      .then((data) => setSessions(data.sessions ?? []))
+      .catch(() => {});
+  };
 
   const toggleSources = (idx: number) => {
     setExpandedSources((prev) => {
@@ -50,6 +64,11 @@ export default function Home() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Fetch all sessions for sidebar on page load
+  useEffect(() => {
+    fetchSessions();
+  }, []);
 
   // Restore session and messages from backend on page load
   useEffect(() => {
@@ -101,10 +120,36 @@ export default function Home() {
           )}
         </div>
 
-        {/* Session History — populated in next step */}
+        {/* Session History */}
         {sidebarOpen && (
           <div className="flex-1 overflow-y-auto px-3 pt-3">
-            <p className="text-xs text-gray-500 px-2 pb-2">Recent Sessions</p>
+            <p className="text-xs text-gray-500 px-2 pb-2 uppercase tracking-wider">Recent Sessions</p>
+            {sessions.length === 0 ? (
+              <p className="text-xs text-gray-600 px-2 italic">No sessions yet</p>
+            ) : (
+              sessions.map((s) => (
+                <button
+                  key={s.session_id}
+                  onClick={() => {
+                    fetch(`${API_BASE_URL}/history/${s.session_id}`)
+                      .then((res) => res.json())
+                      .then((data) => {
+                        localStorage.setItem("session_id", s.session_id);
+                        setSessionId(s.session_id);
+                        setMessages(data.messages ?? []);
+                      });
+                  }}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm mb-1 transition truncate ${
+                    sessionId === s.session_id
+                      ? "bg-blue-700 text-white"
+                      : "text-gray-300 hover:bg-gray-700"
+                  }`}
+                  title={s.filename}
+                >
+                  📄 {s.filename}
+                </button>
+              ))
+            )}
           </div>
         )}
       </aside>
@@ -298,6 +343,7 @@ export default function Home() {
         role: "assistant",
         content: `Successfully loaded "${data.filename}". Ask me anything!`
       }]);
+      fetchSessions();
 
     } catch (error: any) {
       console.error("Full error object:", error);
